@@ -44,9 +44,6 @@ function initializeWildcardImporter() {
   const processButton = document.getElementById(
     "wildcardImporter-process-wildcards"
   );
-  const undoButton = document.getElementById(
-    "wildcardImporter-undo-processing"
-  );
   const statusDiv = document.getElementById(
     "wildcardImporter-processing-status"
   );
@@ -93,15 +90,26 @@ function initializeWildcardImporter() {
     }
   });
 
-  // Handle undo processing button click
-  undoButton.addEventListener("click", undoProcessing);
-
   // Update dropzone text based on selected files
   function updateDropzoneText() {
-    dropzone.textContent =
-      files.length > 0
-        ? `${files.length} file(s) selected`
-        : "Drop files here or click to select";
+    if (files.length === 0) {
+      dropzone.textContent = "Drop files here or click to select";
+      return;
+    }
+    
+    // update name input if it is currently empty and the user uploaded something other than a single TXT file
+    const nameElement = document.getElementById("wildcardImporter-name");
+    if (!nameElement.value?.trim() && (files.length > 1 || !files[0].name.toLowerCase().endsWith(".txt"))) {
+      nameElement.value = files[0].name.replace(/\.[^/.]*$/, "");
+    }
+    
+    
+    if (files.length === 1) {
+      dropzone.textContent = files[0].name;
+      return;
+    }
+    
+    dropzone.textContent =`${files.length} files: ${files.map(file => file.name).join(", ")}`;
   }
 
   // Initialize destination folder and processing history
@@ -128,9 +136,10 @@ async function processWildcards(files) {
 
     // Serialize the array of FileData objects into a JSON string
     const filesJson = JSON.stringify(fileDataArray);
+    const name = document.getElementById("wildcardImporter-name").value;
 
     // Prepare the data payload with the serialized JSON string
-    const payload = { filesJson };
+    const payload = { filesJson, name };
 
     // Send the payload to the 'ProcessWildcards' API endpoint
     genericRequest(
@@ -145,6 +154,11 @@ async function processWildcards(files) {
       },
       true
     );
+    
+    // clear the form
+    document.getElementById("wildcardImporter-file-input").value = "";
+    document.getElementById("wildcardImporter-name").value = "";
+    document.getElementById("wildcardImporter-dropzone").textContent = "Drop files here or click to select";
   } catch (error) {
     console.error("Error processing wildcards:", error);
     alert("An error occurred while processing the files. Please try again.");

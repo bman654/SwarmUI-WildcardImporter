@@ -31,11 +31,12 @@ namespace Spoomples.Extensions.WildcardImporter
             Logs.Info($"WildcardProcessor initialized with destination folder: {destinationFolder}");
         }
 
-        public async Task<string> ProcessFiles(List<FileData> files)
+        public async Task<string> ProcessFiles(List<FileData> files, string prefix)
         {
             string taskId = Guid.NewGuid().ToString();
-            var task = new ProcessingTask { Id = taskId, InFiles = files.Count };
+            var task = new ProcessingTask { Id = taskId, InFiles = files.Count, Prefix = String.IsNullOrWhiteSpace(prefix) ? "" : $"{prefix.Trim()}/" };
             _tasks[taskId] = task;
+            Logs.Info($"Started processing task: {taskId} with prefix '{task.Prefix}' for {files.Count} files: {string.Join(", ", files.Select(f => f.FilePath))}");
 
             _ = Task.Run(async () =>
             {
@@ -139,7 +140,7 @@ namespace Spoomples.Extensions.WildcardImporter
 
         private async Task CollectZipFile(string taskId, string zipPath)
         {
-            Logs.Info($"Collecting ZIP file contents: {zipPath}");
+            Logs.Debug($"Collecting ZIP file contents: {zipPath}");
             using (var archive = ZipFile.OpenRead(zipPath))
             {
                 foreach (var entry in archive.Entries)
@@ -164,28 +165,28 @@ namespace Spoomples.Extensions.WildcardImporter
                     }
                 }
             }
-            Logs.Info($"ZIP file contents collected: {zipPath}");
+            Logs.Debug($"ZIP file contents collected: {zipPath}");
         }
 
         private void CollectYamlFile(string taskId, string yamlContent, string yamlPath)
         {
-            Logs.Info($"Collecting YAML file contents: {yamlPath}");
+            Logs.Debug($"Collecting YAML file contents: {yamlPath}");
             var parsedYaml = _yamlParser.Parse(yamlContent);
-            Logs.Info($"parsedYaml: {parsedYaml.Count} entries");
+            Logs.Debug($"parsedYaml: {parsedYaml.Count} entries");
 
             foreach (var topLevelKvp in parsedYaml)
             {
                 string topLevelKey = topLevelKvp.Key;
                 var topLevelValue = topLevelKvp.Value;
-                Logs.Info($"topLevelKey: {topLevelKey}, topLevelValue: {topLevelValue}");
+                Logs.Debug($"topLevelKey: {topLevelKey}, topLevelValue: {topLevelValue}");
                 CollectYamlContent(taskId, topLevelKey, topLevelValue);
             }
-            Logs.Info($"YAML file contents collected: {yamlPath}");
+            Logs.Debug($"YAML file contents collected: {yamlPath}");
         }
 
         private void CollectYamlContent(string taskId, string currentPath, object currentValue)
         {
-            Logs.Info($"Collecting YAML content: {currentPath}");
+            Logs.Debug($"Collecting YAML content: {currentPath}");
             var task = _tasks[taskId];
             
             // Handle Dictionary<string, object>
@@ -257,22 +258,20 @@ namespace Spoomples.Extensions.WildcardImporter
         private void CollectTextContent(string taskId, string content, string fileName)
         {
             var task = _tasks[taskId];
-            Logs.Info($"Collecting text file contents: {fileName}");
+            Logs.Debug($"Collecting text file contents: {fileName}");
             var lines = content.Split('\n');
             
             // Store in memory with just the filename
             task.InMemoryFiles.TryAdd(fileName, lines.ToList());
             
-            Logs.Info($"Text file contents collected: {fileName}");
+            Logs.Debug($"Text file contents collected: {fileName}");
         }
 
         private async Task ProcessCollectedFiles(string taskId)
         {
             var task = _tasks[taskId];
-            Logs.Info($"Processing collected files with wildcard references");
-            Logs.Info($"InMemoryFiles: {task.InMemoryFiles.Keys.JoinString(", ")}");
+            Logs.Info($"Processing collected files");
             
-            // Process each file, handling wildcard references with glob support
             foreach (var fileEntry in task.InMemoryFiles)
             {
                 string filePath = fileEntry.Key;
@@ -286,13 +285,13 @@ namespace Spoomples.Extensions.WildcardImporter
                 }
                 
                 // Regular text file
-                string outputPath = Path.Combine(destinationFolder, filePath);
+                string outputPath = Path.Combine(destinationFolder, task.Prefix + filePath);
                 if (!outputPath.EndsWith(".txt", StringComparison.InvariantCultureIgnoreCase))
                 {
                     outputPath += ".txt";
                 }
 
-                Logs.Info($"Writing processed lines to: {outputPath}");
+                Logs.Debug($"Writing processed lines to: {outputPath}");
                 
                 Directory.CreateDirectory(Path.GetDirectoryName(outputPath));
                 await File.WriteAllLinesAsync(outputPath, processedLines);
@@ -388,6 +387,7 @@ namespace Spoomples.Extensions.WildcardImporter
         
         private string ProcessWildcardRef(string quantityString, string reference, string taskId)
         {
+            var task = _tasks[taskId];
             // Check if reference contains glob patterns (* or **)
             if (reference.Contains('*'))
             {
@@ -397,9 +397,9 @@ namespace Spoomples.Extensions.WildcardImporter
             // Standard non-glob reference
             if (string.IsNullOrEmpty(quantityString))
             {
-                return $"<wildcard:{reference}>";
+                return $"<wildcard:{task.Prefix + reference}>";
             }
-            return $"<wildcard[{quantityString}]:{reference}>";
+            return $"<wildcard[{quantityString}]:{task.Prefix + reference}>";
         }
         
         private string ProcessGlobWildcardRef(string quantityString, string reference, string taskId)
@@ -413,7 +413,7 @@ namespace Spoomples.Extensions.WildcardImporter
             {
                 Logs.Warning($"No matches found for glob pattern: {reference}");
                 // Return the original reference in a way that shows it's a failed glob
-                return $"<wildcard:{reference}><comment:no glob matches>";
+                return $"<wildcard:{task.Prefix + reference}><comment:no glob matches>";
             }
             
             // Convert to a <random> tag with multiple <wildcard> entries
@@ -423,9 +423,9 @@ namespace Spoomples.Extensions.WildcardImporter
                 string path = matchingPaths.First();
                 if (string.IsNullOrEmpty(quantityString))
                 {
-                    return $"<wildcard:{path}>";
+                    return $"<wildcard:{task.Prefix + path}>";
                 }
-                return $"<wildcard[{quantityString}]:{path}>";
+                return $"<wildcard[{quantityString}]:{task.Prefix + path}>";
             }
             
             // Build a <random> tag with all matches
@@ -436,7 +436,7 @@ namespace Spoomples.Extensions.WildcardImporter
             for (int i = 0; i < matchingPaths.Count; i++)
             {
                 string path = matchingPaths[i];
-                result.Append($"<wildcard:{path}>");
+                result.Append($"<wildcard:{task.Prefix + path}>");
                 if (i < matchingPaths.Count - 1)
                 {
                     result.Append("|");
@@ -730,6 +730,7 @@ namespace Spoomples.Extensions.WildcardImporter
         public int InFiles;
         public int InFilesProcessed;
         public int OutFilesProcessed;
+        public string Prefix;
         public ProcessingStatusEnum Status;
         public ConcurrentBag<string> Errors = new();
         public ConcurrentDictionary<string, string> Backups = new();

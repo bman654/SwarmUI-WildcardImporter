@@ -36,13 +36,13 @@ namespace Spoomples.Extensions.WildcardImporter
         }
 
         [API.APIDescription("Process wildcard files", "{ success: boolean, message: string, taskId: string }")]
-        public async Task<JObject> ProcessWildcards([API.APIParameter("Files to process")] string filesJson)
+        public async Task<JObject> ProcessWildcards([API.APIParameter("Files to process")] string filesJson, [API.APIParameter("Name to save the files under")]string name)
         {
             try
             {
                 var filesData = JsonConvert.DeserializeObject<List<FileData>>(filesJson);
                 // var files = filesData.ToObject<List<FileData>>();
-                string taskId = await _processor.ProcessFiles(filesData);
+                string taskId = await _processor.ProcessFiles(filesData, name);
                 return new JObject
                 {
                     ["success"] = true,
