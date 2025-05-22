@@ -1,4 +1,3 @@
-// WildcardProcessor.cs
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
@@ -18,13 +17,16 @@ namespace Spoomples.Extensions.WildcardImporter
 {
     public class WildcardProcessor
     {
+        private readonly YamlParser _yamlParser;
+        
         // TODO: Allow setting the destination folder via API. Users might want to set it to their own custom folder.
         public readonly string destinationFolder = Utilities.CombinePathWithAbsolute(Program.ServerSettings.Paths.DataPath, Program.ServerSettings.Paths.WildcardsFolder);
         private readonly ConcurrentDictionary<string, ProcessingTask> _tasks = new();
         private readonly ConcurrentBag<ProcessingHistoryItem> _history = new();
 
-        public WildcardProcessor()
+        public WildcardProcessor(YamlParser yamlParser)
         {
+            _yamlParser = yamlParser;
             // Directory.CreateDirectory(destinationFolder);
             Logs.Info($"WildcardProcessor initialized with destination folder: {destinationFolder}");
         }
@@ -32,96 +34,112 @@ namespace Spoomples.Extensions.WildcardImporter
         public async Task<string> ProcessFiles(List<FileData> files)
         {
             string taskId = Guid.NewGuid().ToString();
-            var task = new ProcessingTask { Id = taskId, TotalFiles = files.Count };
+            var task = new ProcessingTask { Id = taskId, InFiles = files.Count };
             _tasks[taskId] = task;
 
             _ = Task.Run(async () =>
             {
-                foreach (var file in files)
+                try
                 {
-                    if (file.Base64Content == null)
+                    // First pass: Collect all files in memory
+                    foreach (var file in files)
                     {
-                        if (!File.Exists(file.FilePath))
+                        if (file.Base64Content == null)
                         {
-                            _tasks[taskId].Errors.Add($"File not found: {file.FilePath}");
-                            return;
-                        }
-
-                        string fileName = Path.GetFileName(file.FilePath);
-                        try
-                        {
-                            await ProcessFile(taskId, fileName, file.FilePath);
-                        }
-                        catch (Exception ex)
-                        {
-                            _tasks[taskId].Errors.Add($"Error processing {file.FilePath}: {ex.Message}");
-                        }
-                    }
-                    else
-                    {
-                        string tempPath = Path.GetTempFileName();
-                        try
-                        {
-                            byte[] fileBytes = Convert.FromBase64String(file.Base64Content);
-                            await File.WriteAllBytesAsync(tempPath, fileBytes);
-                            string fileName = Path.GetFileName(file.FilePath);
-
-                            await ProcessFile(taskId, fileName, tempPath);
-                        }
-                        catch (FormatException fe)
-                        {
-                            _tasks[taskId].Errors.Add($"Invalid base64 content for file {file.FilePath}: {fe.Message}");
-                        }
-                        catch (Exception ex)
-                        {
-                            _tasks[taskId].Errors.Add($"Error processing {file.FilePath}: {ex.Message}");
-                        }
-                        finally
-                        {
-                            if (File.Exists(tempPath))
+                            if (!File.Exists(file.FilePath))
                             {
-                                File.Delete(tempPath);
+                                task.Errors.Add($"File not found: {file.FilePath}");
+                                return;
+                            }
+
+                            string fileName = Path.GetFileName(file.FilePath);
+                            try
+                            {
+                                await CollectFile(taskId, fileName, file.FilePath);
+                            }
+                            catch (Exception ex)
+                            {
+                                task.Errors.Add($"Error collecting {file.FilePath}: {ex.Message}");
                             }
                         }
+                        else
+                        {
+                            string tempPath = Path.GetTempFileName();
+                            try
+                            {
+                                byte[] fileBytes = Convert.FromBase64String(file.Base64Content);
+                                await File.WriteAllBytesAsync(tempPath, fileBytes);
+                                string fileName = Path.GetFileName(file.FilePath);
+
+                                await CollectFile(taskId, fileName, tempPath);
+                            }
+                            catch (FormatException fe)
+                            {
+                                task.Errors.Add($"Invalid base64 content for file {file.FilePath}: {fe.Message}");
+                            }
+                            catch (Exception ex)
+                            {
+                                task.Errors.Add($"Error collecting {file.FilePath}: {ex.Message}");
+                            }
+                            finally
+                            {
+                                if (File.Exists(tempPath))
+                                {
+                                    File.Delete(tempPath);
+                                }
+                            }
+                        }
+
+                        task.InFilesProcessed++;
                     }
-                    task.ProcessedFiles++;
+
+                    // Second pass: Process wildcard references and write files
+                    await ProcessCollectedFiles(taskId);
+
+                    task.Status = ProcessingStatusEnum.Completed;
+                    _history.Add(new ProcessingHistoryItem { TaskId = taskId, Timestamp = DateTime.UtcNow, Description = $"Read {task.InFiles}, wrote {task.OutFilesProcessed} files" });
                 }
-                task.Status = ProcessingStatusEnum.Completed;
-                _history.Add(new ProcessingHistoryItem { TaskId = taskId, Timestamp = DateTime.UtcNow, Description = $"Processed {task.ProcessedFiles} files" });
+                catch (Exception ex)
+                {
+                    task.Status = ProcessingStatusEnum.Failed;
+                    task.Errors.Add($"Error processing files: {ex.Message}");
+                    Logs.Error($"Error processing files: {ex.ReadableString()}");
+                }
             });
 
             return taskId;
         }
 
-        private async Task ProcessFile(string taskId, string fileName, string filePath)
+        private async Task CollectFile(string taskId, string fileName, string filePath)
         {
             var task = _tasks[taskId];
             try
             {
                 if (fileName.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
                 {
-                    await ProcessZipFile(taskId, filePath);
+                    await CollectZipFile(taskId, filePath);
                 }
                 else if (fileName.EndsWith(".yaml", StringComparison.OrdinalIgnoreCase) || fileName.EndsWith(".yml", StringComparison.OrdinalIgnoreCase))
                 {
                     string content = await File.ReadAllTextAsync(filePath);
-                    await ProcessYamlFile(taskId, content, fileName);
+                    CollectYamlFile(taskId, content, fileName);
                 }
                 else if (fileName.EndsWith(".txt", StringComparison.OrdinalIgnoreCase))
                 {
                     string content = await File.ReadAllTextAsync(filePath);
-                    await ProcessTextContent(taskId, content, fileName);
+                    CollectTextContent(taskId, content, fileName);
                 }
             }
             catch (Exception ex)
             {
-                task.Errors.Add($"Error processing {fileName}: {ex.Message}");
+                Logs.Error($"Error collecting {fileName}: {ex.ReadableString()}");
+                task.Errors.Add($"Error collecting {fileName}: {ex.Message}");
             }
         }
 
-        private async Task ProcessZipFile(string taskId, string zipPath)
+        private async Task CollectZipFile(string taskId, string zipPath)
         {
-            Logs.Info($"Processing ZIP file: {zipPath}");
+            Logs.Info($"Collecting ZIP file contents: {zipPath}");
             using (var archive = ZipFile.OpenRead(zipPath))
             {
                 foreach (var entry in archive.Entries)
@@ -132,7 +150,7 @@ namespace Spoomples.Extensions.WildcardImporter
                         using (var reader = new StreamReader(stream))
                         {
                             string content = await reader.ReadToEndAsync();
-                            await ProcessYamlFile(taskId, content, entry.FullName);
+                            CollectYamlFile(taskId, content, entry.FullName);
                         }
                     }
                     else if (entry.FullName.EndsWith(".txt", StringComparison.OrdinalIgnoreCase))
@@ -141,134 +159,479 @@ namespace Spoomples.Extensions.WildcardImporter
                         using (var reader = new StreamReader(stream))
                         {
                             string content = await reader.ReadToEndAsync();
-                            await ProcessTextContent(taskId, content, entry.FullName);
+                            CollectTextContent(taskId, content, entry.FullName);
                         }
                     }
                 }
             }
-            Logs.Info($"ZIP file processed: {zipPath}");
+            Logs.Info($"ZIP file contents collected: {zipPath}");
         }
 
-        private async Task ProcessYamlFile(string taskId, string yamlContent, string yamlPath)
+        private void CollectYamlFile(string taskId, string yamlContent, string yamlPath)
         {
-            Logs.Info($"Processing YAML file: {yamlPath}");
-            var parser = new YamlParser();
-            var parsedYaml = parser.Parse(yamlContent);
+            Logs.Info($"Collecting YAML file contents: {yamlPath}");
+            var parsedYaml = _yamlParser.Parse(yamlContent);
+            Logs.Info($"parsedYaml: {parsedYaml.Count} entries");
 
             foreach (var topLevelKvp in parsedYaml)
             {
                 string topLevelKey = topLevelKvp.Key;
                 var topLevelValue = topLevelKvp.Value;
-                Logs.Info($"Top-level key: {topLevelKey}");
-                Logs.Info($"Top-level value: {YamlParser.SerializeObject(topLevelValue)}");
-
-                await TraverseYaml(taskId, topLevelKey, topLevelKey, topLevelValue);
+                Logs.Info($"topLevelKey: {topLevelKey}, topLevelValue: {topLevelValue}");
+                CollectYamlContent(taskId, topLevelKey, topLevelValue);
             }
-            Logs.Info($"YAML file processed: {yamlPath}");
+            Logs.Info($"YAML file contents collected: {yamlPath}");
         }
 
-        private async Task TraverseYaml(string taskId, string topLevelKey, string currentKey, object currentValue)
+        private void CollectYamlContent(string taskId, string currentPath, object currentValue)
         {
-            if (currentValue is Dictionary<string, object> currentMap)
+            Logs.Info($"Collecting YAML content: {currentPath}");
+            var task = _tasks[taskId];
+            
+            // Handle Dictionary<string, object>
+            if (currentValue is Dictionary<string, object> stringKeyMap)
             {
-                Logs.Info($"Processing map for key: {currentKey}");
-                foreach (var kvp in currentMap)
+                foreach (var kvp in stringKeyMap)
                 {
                     string key = kvp.Key;
                     var value = kvp.Value;
-                    Logs.Info($"Key: {key}");
-                    Logs.Info($"Value: {YamlParser.SerializeObject(value)}");
-
-                    await TraverseYaml(taskId, topLevelKey, key, value);
+                    // Build the nested path by combining current path with key
+                    string nestedPath = $"{currentPath}/{key}";
+                    CollectYamlContent(taskId, nestedPath, value);
+                }
+            }
+            // Handle Dictionary<object, object> by converting keys to strings
+            else if (currentValue is Dictionary<object, object> objectKeyMap)
+            {
+                foreach (var kvp in objectKeyMap)
+                {
+                    // Convert key to string - YAML keys should always be convertible to strings
+                    string key = kvp.Key.ToString();
+                    var value = kvp.Value;
+                    // Build the nested path by combining current path with key
+                    string nestedPath = $"{currentPath}/{key}";
+                    CollectYamlContent(taskId, nestedPath, value);
                 }
             }
             else if (currentValue is List<object> currentList)
             {
-                Logs.Info($"Processing list for key: {currentKey}");
                 if (currentList.Count == 1 && currentList[0] is string singleItem)
                 {
-                    Logs.Info($"Single-item list for key: {currentKey}");
-                    string processedLine = ProcessWildcardLine(singleItem);
-                    await WriteToMainCategory(taskId, topLevelKey, currentKey, processedLine);
+                    // Store in memory with path structure
+                    task.InMemoryFiles.TryAdd(currentPath, new List<string> { singleItem });
                 }
                 else
                 {
-                    Logs.Info($"Multi-item list for key: {currentKey}");
-                    List<string> processedLines = new List<string>();
+                    List<string> stringList = new List<string>();
                     foreach (var item in currentList)
                     {
-                        if (item is string line)
+                        if (item is string stringItem)
                         {
-                            processedLines.Add(ProcessWildcardLine(line));
+                            stringList.Add(stringItem);
                         }
-                        else if (item is Dictionary<string, object> subMap)
+                        else
                         {
-                            foreach (var subKvp in subMap)
-                            {
-                                await TraverseYaml(taskId, topLevelKey, subKvp.Key, subKvp.Value);
-                            }
+                            // For non-string items in the list, we recursively process them with an indexed path
+                            int index = currentList.IndexOf(item);
+                            string indexedPath = $"{currentPath}/{index}";
+                            CollectYamlContent(taskId, indexedPath, item);
                         }
                     }
 
-                    if (processedLines.Any())
+                    if (stringList.Count > 0)
                     {
-                        await WriteToMainCategory(taskId, topLevelKey, currentKey, processedLines);
+                        task.InMemoryFiles.TryAdd(currentPath, stringList);
                     }
                 }
             }
             else if (currentValue is string stringValue)
             {
-                Logs.Info($"Processing string value for key: {currentKey}");
-                string processedLine = ProcessWildcardLine(stringValue);
-                await WriteToMainCategory(taskId, topLevelKey, currentKey, processedLine);
+                // Store in memory with path structure - now using the full path
+                task.InMemoryFiles.TryAdd(currentPath, new List<string> { stringValue });
+            }
+            else {
+                Logs.Warning($"Unknown YAML value type: {currentValue.GetType()}");
             }
         }
 
-        private async Task WriteToMainCategory(string taskId, string topLevelKey, string categoryKey, string line)
+        private void CollectTextContent(string taskId, string content, string fileName)
         {
-            string categoryFolderPath = Path.Combine(destinationFolder, topLevelKey);
-            Directory.CreateDirectory(categoryFolderPath);
-
-            string mainCategoryFilePath = Path.Combine(categoryFolderPath, $"{categoryKey}.txt");
-            Logs.Info($"Adding line to main category file: {mainCategoryFilePath}");
-
-            await File.AppendAllLinesAsync(mainCategoryFilePath, new List<string> { line });
-            _tasks[taskId].ProcessedFiles++;
-        }
-
-        private async Task WriteToMainCategory(string taskId, string topLevelKey, string categoryKey, List<string> lines)
-        {
-            string categoryFolderPath = Path.Combine(destinationFolder, topLevelKey);
-            Directory.CreateDirectory(categoryFolderPath);
-
-            string mainCategoryFilePath = Path.Combine(categoryFolderPath, $"{categoryKey}.txt");
-            Logs.Info($"Writing lines to main category file: {mainCategoryFilePath}");
-
-            await File.WriteAllLinesAsync(mainCategoryFilePath, lines);
-            _tasks[taskId].ProcessedFiles++;
-        }
-
-        private async Task ProcessTextContent(string taskId, string content, string fileName)
-        {
-            Logs.Info($"Processing text file: {fileName}");
+            var task = _tasks[taskId];
+            Logs.Info($"Collecting text file contents: {fileName}");
             var lines = content.Split('\n');
-            var processedLines = lines.Select(ProcessWildcardLine);
-
-            string outputPath = Path.Combine(destinationFolder, fileName);
-            await File.WriteAllLinesAsync(outputPath, processedLines);
-            _tasks[taskId].ProcessedFiles++;
-            Logs.Info($"Text content processed: {outputPath}");
+            
+            // Store in memory with just the filename
+            task.InMemoryFiles.TryAdd(fileName, lines.ToList());
+            
+            Logs.Info($"Text file contents collected: {fileName}");
         }
 
-        private string ProcessWildcardLine(string line)
+        private async Task ProcessCollectedFiles(string taskId)
         {
-            // Replace __ wildcards
-            line = System.Text.RegularExpressions.Regex.Replace(line, @"__(\w+)__", match => $"<wildcard:{match.Groups[1].Value}>");
+            var task = _tasks[taskId];
+            Logs.Info($"Processing collected files with wildcard references");
+            Logs.Info($"InMemoryFiles: {task.InMemoryFiles.Keys.JoinString(", ")}");
+            
+            // Process each file, handling wildcard references with glob support
+            foreach (var fileEntry in task.InMemoryFiles)
+            {
+                string filePath = fileEntry.Key;
+                List<string> lines = fileEntry.Value;
+                
+                // Process each line in the file
+                List<string> processedLines = new List<string>();
+                foreach (var line in lines)
+                {
+                    processedLines.Add(ProcessWildcardLine(line, taskId));
+                }
+                
+                // Regular text file
+                string outputPath = Path.Combine(destinationFolder, filePath);
+                if (!outputPath.EndsWith(".txt", StringComparison.InvariantCultureIgnoreCase))
+                {
+                    outputPath += ".txt";
+                }
 
-            // Replace {} random selections
-            line = System.Text.RegularExpressions.Regex.Replace(line, @"\{([^}]+)\}", match => $"<random:{match.Groups[1].Value.Replace(" ", "")}>");
+                Logs.Info($"Writing processed lines to: {outputPath}");
+                
+                Directory.CreateDirectory(Path.GetDirectoryName(outputPath));
+                await File.WriteAllLinesAsync(outputPath, processedLines);
+                task.OutFilesProcessed++;
+            }
+            
+            Logs.Info($"Completed processing all files with wildcard references");
+        }
+
+        private string ProcessWildcardLine(string line, string taskId)
+        {
+            // See https://github.com/adieyal/sd-dynamic-prompts/blob/main/docs/SYNTAX.md#wildcards
+            // Replace __wildcards__
+            // Matches should include:
+            // 1. __word__
+            // 2. 32$$__word__  (this means pick 32 from the wildcard defined by word)
+            // 3. 10-32$$__word__  (this means pick 10-32 from the wildcard defined by word)
+            var wildcardPattern = @"((\d+(?:-\d+)?)?\\$\\$)?__(.+?)__";
+            line = System.Text.RegularExpressions.Regex.Replace(line, wildcardPattern, match => 
+            {
+                string quantitySpec = match.Groups[2].Success ? match.Groups[2].Value : "";
+                string reference = match.Groups[3].Value;
+                return ProcessWildcardRef(quantitySpec, reference, taskId);
+            });
+
+            // See https://github.com/adieyal/sd-dynamic-prompts/blob/main/docs/SYNTAX.md#variants
+            // Replace {} variants.
+            // Can come in all these variations:
+            // : Simple variants: {a|b|c}  ==> <random:a|b|c>   (the options a,b,c can be any string that does not include | or >)
+            // : Empty options.  These are all valid: {a||c}  {a|b|}  {|b|c}  ==> Just like previous.  Use <comment:empty> to represent empty values.  So {a||c|} becomes <random:a|<comment:empty>|c|<comment:empty>>
+            // : quantifier.  Pick 2 from a|b|c: {2$$a|b|c}  ==> <random[2,]:a|b|c>  (note the comma after the quantifier)
+            // : range.  Pick 2-3 from a|b|c: {2-3$$a|b|c}  ==> <random[2-3,]:a|b|c> (note the comma after the quantifier)
+            // : no lower bound.  Pick 2 or less: {-2$$a|b|c} ==> <random[1-2,]:a|b|c>   (always use 1 as lower bound)
+            // : no upper bound.  Pick 2 or more: {2-$$a|b|c|d}  ==> <random[2-3,]:a|b|c|d>  (always use count-1 as upper bound)
+            // : range/quantifier with custom separator.  Pick 2-3 from a|b|c|d: {2-3$$ and $$a|b|c|d}  (" and " is the custom separator)  ==> <random[2-3,]:a|b|c|d>  Ignore the custom separator.  Log a warning that we do not support it. 
+            // : weighted options by prepending a number and :: before an option: {a|0.5::b|0.75::c}  The weight is 1 for a, 0.5 for b, and 0.75 for c  ==> <random:a|a|b|b|b|c|c|c|c>
+            //      We cannot emit weights.  In our system, all options have weight=1.  So when we encounter this we need to compute the LCM and emit copies of each option so that when you add up all the 1 weights, you get the same relative weights as the original  
+            
+            // First handle variants with quantifiers and possible custom separators
+            line = System.Text.RegularExpressions.Regex.Replace(line, @"\{((?:\d+-\d+|-\d+|\d+-|\d+))\$\$(.*?)(?:\$\$)?(.*?)\}", match => 
+            {
+                string quantifierSpec = "";
+                string numberPart = match.Groups[1].Value;
+                string customSeparator = match.Groups[2].Value;
+                string optionsPart = match.Groups[3].Value;
+                
+                // Log warning if custom separator is found
+                if (!string.IsNullOrEmpty(customSeparator))
+                {
+                    Logs.Warning($"Custom separator in variant not supported: {match.Value}");
+                }
+                
+                // Handle ranges
+                if (numberPart.Contains("-"))
+                {
+                    var rangeParts = numberPart.Split('-');
+                    string lowerBound = rangeParts[0];
+                    string upperBound = rangeParts.Length > 1 ? rangeParts[1] : "";
+                    
+                    // No lower bound case: {-2$$...}
+                    if (string.IsNullOrEmpty(lowerBound))
+                    {
+                        lowerBound = "1";
+                    }
+                    
+                    // No upper bound case: {2-$$...}
+                    if (string.IsNullOrEmpty(upperBound))
+                    {
+                        // Count options to set upper bound
+                        int optionCount = optionsPart.Split('|').Length;
+                        upperBound = optionCount.ToString();
+                    }
+                    
+                    quantifierSpec = $"[{lowerBound}-{upperBound},]";
+                }
+                else
+                {
+                    // Simple quantifier: {2$$...}
+                    quantifierSpec = $"[{numberPart},]";
+                }
+                
+                return ProcessVariantOptions(optionsPart, quantifierSpec);
+            });
+            
+            // Then handle simple variants without quantifiers
+            line = System.Text.RegularExpressions.Regex.Replace(line, @"\{([^}]+)\}", match => 
+            {
+                return ProcessVariantOptions(match.Groups[1].Value, "");
+            });
 
             return line;
+        }
+        
+        private string ProcessWildcardRef(string quantityString, string reference, string taskId)
+        {
+            // Check if reference contains glob patterns (* or **)
+            if (reference.Contains('*'))
+            {
+                return ProcessGlobWildcardRef(quantityString, reference, taskId);
+            }
+            
+            // Standard non-glob reference
+            if (string.IsNullOrEmpty(quantityString))
+            {
+                return $"<wildcard:{reference}>";
+            }
+            return $"<wildcard[{quantityString}]:{reference}>";
+        }
+        
+        private string ProcessGlobWildcardRef(string quantityString, string reference, string taskId)
+        {
+            var task = _tasks[taskId];
+            
+            // Find all matches for the glob pattern
+            List<string> matchingPaths = FindMatchingPaths(reference, task.InMemoryFiles);
+            
+            if (!matchingPaths.Any())
+            {
+                Logs.Warning($"No matches found for glob pattern: {reference}");
+                // Return the original reference in a way that shows it's a failed glob
+                return $"<wildcard:{reference}><comment:no glob matches>";
+            }
+            
+            // Convert to a <random> tag with multiple <wildcard> entries
+            if (matchingPaths.Count == 1)
+            {
+                // Only one match, no need for random
+                string path = matchingPaths.First();
+                if (string.IsNullOrEmpty(quantityString))
+                {
+                    return $"<wildcard:{path}>";
+                }
+                return $"<wildcard[{quantityString}]:{path}>";
+            }
+            
+            // Build a <random> tag with all matches
+            var quantitySpec = string.IsNullOrEmpty(quantityString) ? "" : $"[{quantityString},]";
+            StringBuilder result = new StringBuilder();
+            result.Append($"<random{quantitySpec}:");
+            
+            for (int i = 0; i < matchingPaths.Count; i++)
+            {
+                string path = matchingPaths[i];
+                result.Append($"<wildcard:{path}>");
+                if (i < matchingPaths.Count - 1)
+                {
+                    result.Append("|");
+                }
+            }
+            
+            result.Append(">");
+            return result.ToString();
+        }
+        
+        private List<string> FindMatchingPaths(string globPattern, ConcurrentDictionary<string, List<string>> inMemoryFiles)
+        {
+            List<string> matchingPaths = new List<string>();
+            
+            // Check if pattern contains recursive globbing (**)
+            bool isRecursive = globPattern.Contains("**");
+            
+            foreach (var path in inMemoryFiles.Keys)
+            {
+                if (IsGlobMatch(path, globPattern, isRecursive))
+                {
+                    matchingPaths.Add(path);
+                }
+            }
+            
+            return matchingPaths;
+        }
+        
+        private bool IsGlobMatch(string path, string pattern, bool isRecursive)
+        {
+            // Convert glob pattern to regex pattern
+            // Process the pattern manually instead of using Regex.Escape to handle * and ** correctly
+            StringBuilder regexPattern = new StringBuilder();
+            for (int i = 0; i < pattern.Length; i++)
+            {
+                char c = pattern[i];
+                if (c == '*')
+                {
+                    if (i + 1 < pattern.Length && pattern[i + 1] == '*') // ** pattern
+                    {
+                        regexPattern.Append(".*");
+                        i++; // Skip the next * since we've already processed it
+                    }
+                    else // Single * pattern
+                    {
+                        regexPattern.Append("[^/]*");
+                    }
+                }
+                else
+                {
+                    // Escape special regex characters
+                    if ("[](){}+?^$.|\\".Contains(c))
+                    {
+                        regexPattern.Append('\\');
+                    }
+                    regexPattern.Append(c);
+                }
+            }
+            
+            return Regex.IsMatch(path, $"^{regexPattern}$", RegexOptions.IgnoreCase);
+        }
+
+        private string ProcessVariantOptions(string optionsPart, string quantifierSpec)
+        {
+            string[] options = optionsPart.Split('|');
+            
+            // Check if we have weighted options
+            bool hasWeightedOptions = false;
+            foreach (string option in options)
+            {
+                if (option.Contains("::") && option.IndexOf("::", StringComparison.Ordinal) > 0)
+                {
+                    string weightPart = option.Substring(0, option.IndexOf("::", StringComparison.Ordinal));
+                    if (double.TryParse(weightPart, out _))
+                    {
+                        hasWeightedOptions = true;
+                        break;
+                    }
+                }
+            }
+            
+            if (hasWeightedOptions)
+            {
+                var weightedOptions = ProcessWeightedOptions(options);
+                return $"<random{quantifierSpec}:{string.Join("|", weightedOptions)}>";
+            }
+            
+            // Handle empty options
+            for (int i = 0; i < options.Length; i++)
+            {
+                if (string.IsNullOrEmpty(options[i]))
+                {
+                    options[i] = "<comment:empty>";
+                }
+            }
+            
+            return $"<random{quantifierSpec}:{string.Join("|", options)}>";
+        }
+        
+        private string[] ProcessWeightedOptions(string[] options)
+        {
+            var result = new List<string>();
+            var weights = new List<double>();
+            var unweightedOptions = new List<string>();
+            
+            // Extract weights and options
+            foreach (var option in options)
+            {
+                if (option.Contains("::") && option.IndexOf("::", StringComparison.Ordinal) > 0)
+                {
+                    string weightPart = option.Substring(0, option.IndexOf("::", StringComparison.Ordinal));
+                    string valuePart = option.Substring(option.IndexOf("::", StringComparison.Ordinal) + 2);
+                    
+                    if (double.TryParse(weightPart, out double weight))
+                    {
+                        weights.Add(weight);
+                        unweightedOptions.Add(string.IsNullOrEmpty(valuePart) ? "<comment:empty>" : valuePart);
+                    }
+                    else
+                    {
+                        // If parsing fails, treat as unweighted
+                        weights.Add(1.0);
+                        unweightedOptions.Add(string.IsNullOrEmpty(option) ? "<comment:empty>" : option);
+                    }
+                }
+                else
+                {
+                    weights.Add(1.0);
+                    unweightedOptions.Add(string.IsNullOrEmpty(option) ? "<comment:empty>" : option);
+                }
+            }
+            
+            // If all weights are 1.0, no need for special processing
+            if (weights.All(w => Math.Abs(w - 1.0) < 0.001))
+            {
+                return unweightedOptions.ToArray();
+            }
+            
+            // Calculate multiplier to get integer weights
+            double multiplier = 1.0;
+            foreach (var weight in weights)
+            {
+                var fractionalPart = weight - Math.Floor(weight);
+                if (fractionalPart > 0)
+                {
+                    // Find multiplier that makes all weights integers
+                    int precision = (int)Math.Pow(10, fractionalPart.ToString().TrimStart('0', '.').Length);
+                    multiplier = Math.Max(multiplier, precision);
+                }
+            }
+            
+            // Convert to integer weights
+            List<int> intWeights = weights.Select(w => (int)Math.Round(w * multiplier)).ToList();
+            
+            // Find GCD for all weights
+            int gcd = intWeights.Count > 0 ? intWeights[0] : 1;
+            for (int i = 1; i < intWeights.Count; i++)
+            {
+                gcd = GCD(gcd, intWeights[i]);
+            }
+            
+            // Calculate normalized weights
+            var normalizedWeights = intWeights.Select(w => w / gcd).ToList();
+            
+            // Create duplicated options according to weights
+            for (int i = 0; i < unweightedOptions.Count; i++)
+            {
+                for (int j = 0; j < normalizedWeights[i]; j++)
+                {
+                    result.Add(unweightedOptions[i]);
+                }
+            }
+            
+            return result.ToArray();
+        }
+        
+        private int GCD(int a, int b)
+        {
+            while (b != 0)
+            {
+                int temp = b;
+                b = a % b;
+                a = temp;
+            }
+            return a;
+        }
+        
+        private int GCD(int a, int b, params int[] numbers)
+        {
+            int result = GCD(a, b);
+            foreach (int number in numbers)
+            {
+                result = GCD(result, number);
+            }
+            return result;
         }
 
         public ProgressStatus GetStatus(string taskId)
@@ -278,7 +641,10 @@ namespace Spoomples.Extensions.WildcardImporter
                 return new ProgressStatus
                 {
                     Status = task.Status.ToString(),
-                    Progress = (float)task.ProcessedFiles / task.TotalFiles,
+                    Infiles = task.InFiles,
+                    Outfiles = task.InMemoryFiles.Count,
+                    InfilesProcessed = task.InFilesProcessed,
+                    OutfilesProcessed = task.OutFilesProcessed,
                     Conflicts = task.Conflicts.ToList()
                 };
             }
@@ -356,88 +722,31 @@ namespace Spoomples.Extensions.WildcardImporter
 
             return newPath;
         }
-
-        public async Task<string> ProcessFilesAsync(List<FileData> filesData, Func<ProgressStatus, Task> statusCallback)
-        {
-            string taskId = Guid.NewGuid().ToString();
-            var processingTask = new ProcessingTask
-            {
-                Id = taskId,
-                Files = filesData,
-                StatusCallback = statusCallback
-            };
-
-            _tasks[taskId] = processingTask;
-
-            _ = Task.Run(async () =>
-            {
-                try
-                {
-                    // Initialize processing
-                    processingTask.ProgressStatus = new ProgressStatus
-                    {
-                        Status = "Started",
-                        Progress = 0,
-                        Conflicts = new()
-                    };
-                    await processingTask.StatusCallback(processingTask.ProgressStatus);
-
-                    // Example processing loop
-                    for (int i = 1; i <= 100; i++)
-                    {
-                        // Simulate processing work
-                        await Task.Delay(100);
-
-                        // Update progress
-                        processingTask.ProgressStatus.Progress = i;
-                        await processingTask.StatusCallback(processingTask.ProgressStatus);
-                    }
-
-                    processingTask.ProgressStatus.Status = "Completed";
-                    await processingTask.StatusCallback(processingTask.ProgressStatus);
-                }
-                catch (Exception ex)
-                {
-                    processingTask.ProgressStatus.Status = "Error";
-                    processingTask.ProgressStatus.Message = ex.Message;
-                    await processingTask.StatusCallback(processingTask.ProgressStatus);
-                }
-            });
-
-            return taskId;
-        }
-
-        public async Task WaitForProcessingToCompleteAsync(string taskId)
-        {
-            if (_tasks.ContainsKey(taskId))
-            {
-                var processingTask = _tasks[taskId];
-                await processingTask.CompletionSource.Task;
-            }
-        }
     }
 
     public class ProcessingTask
     {
         public string Id;
-        public List<FileData> Files;
-        public int TotalFiles;
-        public int ProcessedFiles;
+        public int InFiles;
+        public int InFilesProcessed;
+        public int OutFilesProcessed;
         public ProcessingStatusEnum Status;
-        public ProgressStatus ProgressStatus;
         public ConcurrentBag<string> Errors = new();
         public ConcurrentDictionary<string, string> Backups = new();
         public ConcurrentBag<ConflictInfo> Conflicts = new();
-        public TaskCompletionSource<bool> CompletionSource = new();
-        public Func<ProgressStatus, Task> StatusCallback;
+
+        // In-memory structure to hold all discovered files before processing wildcard references
+        public ConcurrentDictionary<string, List<string>> InMemoryFiles = new();
     }
 
     public struct ProgressStatus
     {
         public string Status;
-        public float Progress;
+        public int Infiles;
+        public int Outfiles;
+        public int InfilesProcessed;
+        public int OutfilesProcessed;
         public List<ConflictInfo> Conflicts;
-        public string Message;
     }
 
     public enum ProcessingStatusEnum

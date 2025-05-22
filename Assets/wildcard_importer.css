@@ -1,0 +1,33 @@
+/* Roguelike Progress Indicator Styles */
+.ascii-progress {
+    white-space: pre;
+    font-family: 'Courier New', monospace;
+    background-color: #000;
+    color: #aaa;
+    padding: 10px;
+    border-radius: 5px;
+    overflow-x: auto;
+    line-height: 1.2;
+    margin: 10px 0;
+}
+
+/* Roguelike color scheme */
+.rogue-player { color: #fff; }
+.rogue-player.rogue-special { background-color: #fff; color: #000; }
+.rogue-wall { color: #666; }
+.rogue-floor { color: #555; }
+.rogue-monster-1 { color: #a33; }
+.rogue-monster-2 { color: #3a3; }
+.rogue-monster-3 { color: #33a; }
+.rogue-monster-4 { color: #a3a; }
+.rogue-monster-5 { color: #aa3; }
+.rogue-item { color: #ff3; }
+.rogue-special { color: #3af; }
+
+#wildcardimportertabcontent .card-body {
+    background-color: var(--background-panel);
+}
+
+#wildcardimportertabcontent .dropzone {
+    background-color: var(--background);
+}

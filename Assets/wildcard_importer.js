@@ -138,7 +138,6 @@ async function processWildcards(files) {
       payload,
       (data) => {
         if (data.success) {
-          alert("Processing started. Task ID: " + data.taskId);
           updateStatus(data.taskId);
         } else {
           alert("Error: " + data.message);
@@ -184,13 +183,28 @@ function updateStatus(taskId) {
     const statusDiv = document.getElementById(
       "wildcardImporter-processing-status"
     );
-    statusDiv.innerHTML = `
+    
+    // Prepare the main status content
+    let statusContent = `
           <h4>Processing Status</h4>
           <p>Status: ${data.Status}</p>
-          <p>Progress: ${(data.Progress)}%</p>
-      `;
+          <p>Read Progress: ${data.InfilesProcessed} of ${data.Infiles} files examined</p>
+          <p>Write Progress: ${data.OutfilesProcessed} of ${data.Outfiles} files written</p>
+          <div class="ascii-progress">`;
+    
+    // Add the ASCII progress visualization with error handling
+    try {
+      statusContent += generateProgressMaze(data.InfilesProcessed, data.Infiles, data.OutfilesProcessed, data.Outfiles);
+    } catch (error) {
+      console.error("Error generating roguelike progress maze:", error);
+      // Fallback to a simple progress display
+      statusContent += `<div>Input files: ${data.InfilesProcessed}/${data.Infiles}, Output files: ${data.OutfilesProcessed}/${data.Outfiles}</div>`;
+    }
+    
+    statusContent += `</div>`;
+    statusDiv.innerHTML = statusContent;
 
-    if (data.conflicts && data.conflicts.length > 0) {
+    if (data.Conflicts?.length > 0) {
       statusDiv.innerHTML += `<h4>Conflicts</h4>`;
       data.Conflicts.forEach((conflict) => {
         statusDiv.innerHTML += `
@@ -266,4 +280,223 @@ function updateDestinationFolder() {
   genericRequest("GetDestinationFolder", {}, (data) => {
     destinationFolder.textContent = data.folderPath;
   });
+}
+
+// Generates an ASCII art maze showing progress
+function generateProgressMaze(infilesProcessed, totalInfiles, outfilesProcessed, totalOutfiles) {
+  try {
+    // Ensure all input parameters are valid numbers
+    infilesProcessed = Number(infilesProcessed) || 0;
+    totalInfiles = Number(totalInfiles) || 1; // Avoid division by zero
+    outfilesProcessed = Number(outfilesProcessed) || 0;
+    totalOutfiles = Number(totalOutfiles) || 0;
+    
+    // Determine which phase we're in - descending or ascending
+    const descendingPhase = infilesProcessed < totalInfiles;
+    
+    // Calculate progress for current phase
+    let phaseProgress;
+    let currentDepth;
+    let depthDescription;
+    
+    if (descendingPhase) {
+      // Descending phase - going deeper into the dungeon
+      phaseProgress = totalInfiles > 0 ? infilesProcessed / totalInfiles : 0;
+      currentDepth = Math.max(1, Math.ceil(phaseProgress * 5)); // Depth 1-5, never below 1
+      depthDescription = `Descending to Level ${currentDepth}`;
+    } else {
+      // Ascending phase - coming back up with the amulet
+      phaseProgress = totalOutfiles > 0 ? outfilesProcessed / totalOutfiles : 0;
+      currentDepth = Math.max(1, Math.floor(5 - (phaseProgress * 4))); // Depth 5-1, never below 1
+      depthDescription = `Ascending from Level ${currentDepth}`;
+    }
+    
+    // Characters for our roguelike dungeon
+    const wall = '#';            // Wall
+    const wallVert = '|';        // Vertical wall
+    const corner = '+';          // Corner/door
+    const player = '@';          // Player character
+    const start = '<';           // Stairs up
+    const end = ',';             // Amulet of Yendor (traditionally comma in Rogue)
+    const space = '.';           // Floor
+    const treasures = ['$', '*', '8']; // Gold, gems, valuable items
+    const stairs = '>'; // Stairs down
+    
+    // Monster types (by depth level)
+    const monsters = [
+      ['k', 'r', 'B'],           // Level 1: kobolds, rats, bats
+      ['g', 'o', 'S'],           // Level 2: goblins, orcs, snakes
+      ['T', 'O', 'Z'],           // Level 3: trolls, ogres, zombies
+      ['D', 'V', 'W'],           // Level 4: dragons, vampires, wraiths
+      ['&', 'L', 'J']            // Level 5: demons, liches, jabberwocks
+    ];
+    
+    // Width of the progress bar (excluding borders)
+    const width = 50;
+    
+    // Calculate player position based on phase
+    let playerPos;
+    if (descendingPhase) {
+      // Moving left to right while descending
+      playerPos = Math.floor(phaseProgress * width);
+    } else {
+      // Moving right to left while ascending
+      playerPos = Math.floor((1 - phaseProgress) * width);
+    }
+    
+    // Player has the amulet during ascent
+    const playerChar = descendingPhase ? player : player + end;
+    
+    // Generate the 5 lines of the dungeon
+    const maze = [];
+    
+    // Line 1: Top border with stairs and dungeon edge
+    let line1 = `  <span class="rogue-special">${start}</span> `;
+    line1 += `<span class="rogue-wall">${wall.repeat(width)}</span>`;
+    line1 += ` <span class="rogue-special">${stairs}</span>`;
+    maze.push(line1);
+    
+    // Line 2: The main dungeon path with player
+    let line2 = `  <span class="rogue-wall">${wallVert}</span> `;
+    for (let i = 0; i < width; i++) {
+      if (i === playerPos) {
+        if (descendingPhase) {
+          line2 += `<span class="rogue-player">${player}</span>`;
+        } else {
+          // During ascent, player carries the amulet
+          line2 += `<span class="rogue-player rogue-special">${player}</span>`;
+        }
+      } else if ((descendingPhase && i < playerPos) || (!descendingPhase && i > playerPos)) {
+        // Add occasional treasure in cleared areas
+        if (i % 7 === 0 && i % 3 === 0) {
+          line2 += `<span class="rogue-item">${treasures[i % treasures.length]}</span>`;
+        } else {
+          line2 += `<span class="rogue-floor">${space}</span>`;
+        }
+      } else {
+        // Add monsters based on current depth
+        if (i % (7 - currentDepth) === 0) {
+          // Select monster based on current dungeon depth (ensure index is valid)
+          const monsterIndex = Math.max(0, Math.min(currentDepth - 1, 4)); // Ensure index is between 0-4
+          const monsterSet = monsters[monsterIndex];
+          if (monsterSet && monsterSet.length > 0) {
+            const monsterChar = monsterSet[i % monsterSet.length];
+            line2 += `<span class="rogue-monster-${Math.min(currentDepth, 5)}">${monsterChar}</span>`;
+          } else {
+            line2 += `<span class="rogue-floor">${space}</span>`;
+          }
+        } else {
+          line2 += `<span class="rogue-floor">${space}</span>`;
+        }
+      }
+    }
+    line2 += ` <span class="wall">${wallVert}</span>`;
+    maze.push(line2);
+    
+    // Line 3: Middle dungeon corridor with monsters
+    let line3 = `  <span class="rogue-wall">${wallVert}</span> `;
+    for (let i = 0; i < width; i++) {
+      if (currentDepth > 1 && i % (8 - currentDepth) === 3) {
+        // Select monster based on current depth (ensure index is valid)
+        const monsterIndex = Math.max(0, Math.min(currentDepth - 1, 4)); // Ensure index is between 0-4
+        const monsterSet = monsters[monsterIndex];
+        if (monsterSet && monsterSet.length > 0) {
+          const monsterChar = monsterSet[(i + 1) % monsterSet.length];
+          line3 += `<span class="rogue-monster-${Math.min(currentDepth, 5)}">${monsterChar}</span>`;
+        } else {
+          line3 += `<span class="rogue-floor">${space}</span>`;
+        }
+      } else if (i % 9 === 0) {
+        if (descendingPhase && i > width * 0.8 && infilesProcessed > totalInfiles * 0.8) {
+          // Show amulet near the end of descent
+          line3 += `<span class="rogue-special">${end}</span>`;
+        } else {
+          // Add occasional treasure
+          line3 += `<span class="rogue-item">${treasures[(i/9) % treasures.length]}</span>`;
+        }
+      } else {
+        line3 += `<span class="rogue-floor">${space}</span>`;
+      }
+    }
+    line3 += ` <span class="wall">${wallVert}</span>`;
+    maze.push(line3);
+    
+    // Line 4: Bottom dungeon corridor with monsters and items
+    let line4 = `  <span class="rogue-wall">${wallVert}</span> `;
+    for (let i = 0; i < width; i++) {
+      if (currentDepth > 2 && i % (9 - currentDepth) === 5) {
+        // Harder monsters for higher depth (ensure index is valid)
+        const monsterIndex = Math.max(0, Math.min(currentDepth - 1, 4)); // Ensure index is between 0-4
+        const monsterSet = monsters[monsterIndex];
+        if (monsterSet && monsterSet.length > 0) {
+          const monsterChar = monsterSet[(i + 2) % monsterSet.length];
+          line4 += `<span class="rogue-monster-${Math.min(currentDepth, 5)}">${monsterChar}</span>`;
+        } else {
+          line4 += `<span class="rogue-floor">${space}</span>`;
+        }
+      } else if (!descendingPhase && i === playerPos + 3) {
+        // Special item near the player during ascent
+        line4 += '<span class="rogue-special">!</span>'; // Potion
+      } else if (i % 11 === 0) {
+        // Occasional feature
+        const feature = ['^', '!', '=', '%'][i % 4]; // Trap, potion, ring, food
+        line4 += `<span class="rogue-special">${feature}</span>`;
+      } else {
+        line4 += `<span class="rogue-floor">${space}</span>`;
+      }
+    }
+    line4 += ` <span class="wall">${wallVert}</span>`;
+    maze.push(line4);
+    
+    // Line 5: Display depth and phase info
+    let line5;
+    if (descendingPhase) {
+      // Show stairs down during descent
+      line5 = `  <span class="rogue-wall">${corner}</span> `;
+      line5 += `<span class="rogue-wall">${wall.repeat(playerPos)}</span>`;
+      if (playerPos < width) {
+        line5 += `<span class="rogue-wall">${wall.repeat(width - playerPos)}</span>`;
+      }
+      line5 += ` <span class="rogue-special">${stairs}</span>`;
+    } else {
+      // Show stairs up during ascent
+      line5 = `  <span class="rogue-special">${start}</span> `;
+      line5 += `<span class="rogue-wall">${wall.repeat(width)}</span>`;
+      line5 += ` <span class="rogue-wall">${corner}</span>`;
+    }
+    maze.push(line5);
+    
+    // Stats line showing progress in roguelike style
+    let phaseProgressPercent = Math.round(phaseProgress * 100);
+    let overallProgressPercent = Math.round((infilesProcessed + outfilesProcessed) / (totalInfiles + totalOutfiles) * 100);
+    
+    // Calculate HP based on current phase
+    let hpPercent = descendingPhase ? phaseProgress : (1 - phaseProgress);
+    let hp = '@'.repeat(Math.ceil(hpPercent * 10));
+    
+    let statsLine = `  ${depthDescription} | `;
+    
+    if (descendingPhase) {
+      if (infilesProcessed >= totalInfiles) {
+        statsLine += `Found Amulet! | `;
+      } else {
+        statsLine += `Searching: ${phaseProgressPercent}% | `;
+      }
+      statsLine += `Read: ${infilesProcessed}/${totalInfiles} | Target Files: ${totalOutfiles}`;
+    } else {
+      statsLine += `Escaping: ${phaseProgressPercent}% | Written: ${outfilesProcessed}/${totalOutfiles}`;
+      if (outfilesProcessed >= totalOutfiles) {
+        statsLine += ` | ESCAPED!`;
+      }
+    }
+    
+    statsLine += ` | HP: <span class="rogue-player">${hp}</span>`;
+    maze.push(statsLine);
+    
+    return maze.join('\n');
+  } catch (error) {
+    console.error("Error in generateProgressMaze:", error);
+    // Return a simple fallback progress display
+    return `<div>Progress: Input files: ${infilesProcessed}/${totalInfiles}, Output files: ${outfilesProcessed}/${totalOutfiles}</div>`;
+  }
 }

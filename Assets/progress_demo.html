@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Roguelike Progress Visualization Demo</title>
+    <style>
+        body {
+            font-family: 'Courier New', monospace;
+            background-color: #000;
+            color: #ccc;
+            margin: 0;
+            padding: 20px;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background-color: #111;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+        }
+        h1 {
+            color: #ddd;
+            text-shadow: 0 0 5px #666;
+        }
+        .status-container {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px solid #333;
+            border-radius: 5px;
+            background-color: #222;
+            color: #aaa;
+        }
+        .ascii-progress {
+            white-space: pre;
+            font-family: 'Courier New', monospace;
+            background-color: #000;
+            color: #aaa;
+            padding: 10px;
+            border-radius: 5px;
+            overflow-x: auto;
+            line-height: 1.2;
+        }
+        /* Roguelike color scheme */
+        .rogue-player { color: #fff; }
+        .rogue-wall { color: #666; }
+        .rogue-floor { color: #555; }
+        .rogue-monster-1 { color: #a33; }
+        .rogue-monster-2 { color: #3a3; }
+        .rogue-monster-3 { color: #33a; }
+        .rogue-monster-4 { color: #a3a; }
+        .rogue-monster-5 { color: #aa3; }
+        .rogue-item { color: #ff3; }
+        .rogue-special { color: #3af; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Roguelike Progress Visualization Demo</h1>
+        
+        <div class="params-grid">
+            <div class="param-item">
+                <label for="totalInfiles">Total Input Files:</label>
+                <input type="number" id="totalInfiles" value="20" min="1">
+            </div>
+            <div class="param-item">
+                <label for="infilesProcessed">Input Files Processed:</label>
+                <input type="number" id="infilesProcessed" value="0" min="0">
+            </div>
+            <div class="param-item">
+                <label for="maxOutfiles">Total Output Files:</label>
+                <input type="number" id="maxOutfiles" value="50" min="1">
+            </div>
+            <div class="param-item">
+                <label for="outfilesDiscovered">Output Files Discovered:</label>
+                <input type="number" id="outfilesDiscovered" value="0" min="0" readonly>
+            </div>
+            <div class="param-item">
+                <label for="outfilesProcessed">Output Files Processed:</label>
+                <input type="number" id="outfilesProcessed" value="0" min="0">
+            </div>
+            <div class="param-item">
+                <label for="infileSpeed">Input Process Speed (ms):</label>
+                <input type="number" id="infileSpeed" value="500" min="100">
+            </div>
+            <div class="param-item">
+                <label for="outfileSpeed">Output Process Speed (ms):</label>
+                <input type="number" id="outfileSpeed" value="800" min="100">
+            </div>
+        </div>
+        
+        <div class="speed-controls">
+            <button id="updateParams">Update Parameters</button>
+            <button id="pauseResumeBtn">Pause</button>
+        </div>
+
+        <div class="status-container">
+            <h4>Processing Status</h4>
+            <p id="status-text">Status: Running</p>
+            <p id="read-progress">Read Progress: 0 of 3 files examined</p>
+            <p id="write-progress">Write Progress: 0 of 0 files written</p>
+            <div class="ascii-progress" id="ascii-progress-container"></div>
+        </div>
+        
+        <div class="controls">
+            <button id="resetBtn">Reset Progress</button>
+            <button id="completeBtn">Complete All</button>
+        </div>
+        
+        <div>
+            <h4>Roguelike Progress Indicator</h4>
+            <p>This demo simulates a roguelike dungeon crawl where:</p>
+            <ul>
+                <li><span class="rogue-player">@</span> - You, the hero (moves based on overall progress)</li>
+                <li><span class="rogue-special"><</span> - Stairs up (start of the journey)</li>
+                <li><span class="rogue-special">,</span> - The Amulet of Yendor (goal)</li>
+                <li><span class="rogue-floor">.</span> - Floor tiles</li>
+                <li><span class="rogue-monster-1">k r B</span> - Level 1 monsters: kobolds, rats, bats</li>
+                <li><span class="rogue-monster-2">g o S</span> - Level 2 monsters: goblins, orcs, snakes</li>
+                <li><span class="rogue-monster-3">T O Z</span> - Level 3 monsters: trolls, ogres, zombies</li>
+                <li><span class="rogue-monster-4">D V W</span> - Level 4 monsters: dragons, vampires, wraiths</li>
+                <li><span class="rogue-monster-5">& L J</span> - Level 5 monsters: demons, liches, jabberwocks</li>
+                <li><span class="rogue-item">$ * 8</span> - Treasures: gold, gems, valuable items</li>
+                <li><span class="rogue-special">^ ! = %</span> - Special features: traps, potions, rings, food</li>
+            </ul>
+            <p>The dungeon gets deeper (more complex) as output files increase!</p>
+        </div>
+        
+        <div class="legend">
+            <h3>Roguelike Legend</h3>
+            <p><span class="rogue-player">@</span> - Your character (the hero)</p>
+            <p><span class="rogue-special">,</span> - The Amulet of Yendor (goal)</p>
+            <p><span class="rogue-floor">.</span> - Floor tile</p>
+            <p><span class="rogue-wall">#</span> - Wall</p>
+            <p><span class="rogue-monster-1">k</span> <span class="rogue-monster-1">r</span> <span class="rogue-monster-1">B</span> - Level 1 monsters (kobolds, rats, bats)</p>
+            <p><span class="rogue-monster-2">g</span> <span class="rogue-monster-2">o</span> <span class="rogue-monster-2">S</span> - Level 2 monsters (goblins, orcs, snakes)</p>
+            <p><span class="rogue-monster-3">T</span> <span class="rogue-monster-3">O</span> <span class="rogue-monster-3">Z</span> - Level 3 monsters (trolls, ogres, zombies)</p>
+            <p><span class="rogue-monster-4">D</span> <span class="rogue-monster-4">V</span> <span class="rogue-monster-4">W</span> - Level 4 monsters (dragons, vampires, wraiths)</p>
+            <p><span class="rogue-monster-5">&</span> <span class="rogue-monster-5">L</span> <span class="rogue-monster-5">J</span> - Level 5 monsters (demons, liches, jabberwocks)</p>
+            <p><span class="rogue-item">$</span> <span class="rogue-item">*</span> <span class="rogue-item">8</span> - Treasure</p>
+            <p><span class="rogue-special">^</span> <span class="rogue-special">!</span> <span class="rogue-special">=</span> <span class="rogue-special">%</span> - Special items (trap, potion, ring, food)</p>
+            <p><span class="rogue-special"><</span> - Stairs up (entrance)</p>
+            <p><span class="rogue-special">></span> - Stairs down</p>
+            <p>First Phase: Descend through dungeon, processing input files (left to right)</p>
+            <p>Second Phase: Ascend with Amulet, processing output files (right to left)</p>
+        </div>
+
+        <div class="instructions">
+            <h3>Instructions</h3>
+            <p>Adjust the values to see how the progress indicator changes:</p>
+            <ul>
+                <li>Input Files Total: The total number of input files to process</li>
+                <li>Input Files Processed: How many input files have been processed so far</li>
+                <li>Output Files Total: The total number of output files to generate</li>
+                <li>Output Files Processed: How many output files have been generated so far</li>
+            </ul>
+            <p>Note: Output files can only be processed after all input files are complete.</p>
+            <p>Workflow phases:</p>
+            <ol>
+                <li>Descending: Process input files (left to right, going deeper)</li>
+                <li>Find the Amulet: Complete all input file processing</li>
+                <li>Ascending: Process output files (right to left, going up)</li>
+                <li>Escape: Complete all output file processing</li>
+            </ol>
+        </div>
+        
+    </div>
+
+    <script>
+        // Load state from localStorage or use defaults
+        const state = {
+            totalInfiles: parseInt(localStorage.getItem('totalInfiles')) || 20,
+            infilesProcessed: parseInt(localStorage.getItem('infilesProcessed')) || 0,
+            maxOutfiles: parseInt(localStorage.getItem('maxOutfiles')) || 50,
+            outfilesDiscovered: parseInt(localStorage.getItem('outfilesDiscovered')) || 0,
+            outfilesProcessed: parseInt(localStorage.getItem('outfilesProcessed')) || 0,
+            running: false,
+            infileInterval: null,
+            outfileInterval: null
+        };
+
+        // DOM elements
+        const statusText = document.getElementById('status-text');
+        const readProgress = document.getElementById('read-progress');
+        const writeProgress = document.getElementById('write-progress');
+        const asciiContainer = document.getElementById('ascii-progress-container');
+        const resetBtn = document.getElementById('resetBtn');
+        const completeBtn = document.getElementById('completeBtn');
+        const pauseResumeBtn = document.getElementById('pauseResumeBtn');
+        const updateParamsBtn = document.getElementById('updateParams');
+        
+        // Get input elements
+        const infilesTotal = document.getElementById('totalInfiles');
+        const infilesProcessedInput = document.getElementById('infilesProcessed');
+        const outfilesTotal = document.getElementById('maxOutfiles');
+        const outfilesDiscoveredInput = document.getElementById('outfilesDiscovered');
+        const outfilesProcessedInput = document.getElementById('outfilesProcessed');
+        const infileSpeedInput = document.getElementById('infileSpeed');
+        const outfileSpeedInput = document.getElementById('outfileSpeed');
+
+        // Generates an ASCII art roguelike dungeon showing progress
+        function generateProgressDungeon(infilesProcessed, totalInfiles, outfilesProcessed, totalOutfiles) {
+          // Determine which phase we're in - descending or ascending
+          const descendingPhase = infilesProcessed < totalInfiles;
+          
+          // Calculate progress for current phase
+          let phaseProgress;
+          let currentDepth;
+          let depthDescription;
+          
+          if (descendingPhase) {
+            // Descending phase - going deeper into the dungeon
+            phaseProgress = totalInfiles > 0 ? infilesProcessed / totalInfiles : 0;
+            currentDepth = Math.ceil(phaseProgress * 5); // Depth 1-5
+            depthDescription = `Descending to Level ${currentDepth}`;
+          } else {
+            // Ascending phase - coming back up with the amulet
+            phaseProgress = totalOutfiles > 0 ? outfilesProcessed / totalOutfiles : 0;
+            currentDepth = Math.floor(5 - (phaseProgress * 4)); // Depth 5-1
+            if (currentDepth < 1) currentDepth = 1;
+            depthDescription = `Ascending from Level ${currentDepth}`;
+          }
+          
+          // Characters for our roguelike dungeon
+          const wall = '#';            // Wall
+          const wallVert = '|';        // Vertical wall
+          const corner = '+';          // Corner/door
+          const player = '@';          // Player character
+          const start = '<';           // Stairs up
+          const end = ',';             // Amulet of Yendor (traditionally comma in Rogue)
+          const space = '.';           // Floor
+          const treasures = ['$', '*', '8']; // Gold, gems, valuable items
+          const stairs = '>'; // Stairs down
+          
+          // Monster types (by depth level)
+          const monsters = [
+            ['k', 'r', 'B'],           // Level 1: kobolds, rats, bats
+            ['g', 'o', 'S'],           // Level 2: goblins, orcs, snakes
+            ['T', 'O', 'Z'],           // Level 3: trolls, ogres, zombies
+            ['D', 'V', 'W'],           // Level 4: dragons, vampires, wraiths
+            ['&', 'L', 'J']            // Level 5: demons, liches, jabberwocks
+          ];
+          
+          // Width of the progress bar (excluding borders)
+          const width = 50;
+          
+          // Calculate player position based on phase
+          let playerPos;
+          if (descendingPhase) {
+            // Moving left to right while descending
+            playerPos = Math.floor(phaseProgress * width);
+          } else {
+            // Moving right to left while ascending
+            playerPos = Math.floor((1 - phaseProgress) * width);
+          }
+          
+          // Generate the 5 lines of the dungeon
+          const maze = [];
+          
+          // Line 1: Top border with stairs and dungeon edge
+          let line1 = `  <span class="rogue-special">${start}</span> `;
+          line1 += `<span class="rogue-wall">${wall.repeat(width)}</span>`;
+          line1 += ` <span class="rogue-special">${stairs}</span>`;
+          maze.push(line1);
+          
+          // Line 2: The main dungeon path with player
+          let line2 = `  <span class="rogue-wall">${wallVert}</span> `;
+          for (let i = 0; i < width; i++) {
+            if (i === playerPos) {
+              if (descendingPhase) {
+                line2 += `<span class="rogue-player">${player}</span>`;
+              } else {
+                // During ascent, player carries the amulet
+                line2 += `<span class="rogue-player">${player}</span><span class="rogue-special">${end}</span>`.substring(0, 1);
+              }
+            } else if ((descendingPhase && i < playerPos) || (!descendingPhase && i > playerPos)) {
+              // Add occasional treasure in cleared areas
+              if (i % 7 === 0 && i % 3 === 0) {
+                line2 += `<span class="rogue-item">${treasures[i % treasures.length]}</span>`;
+              } else {
+                line2 += `<span class="rogue-floor">${space}</span>`;
+              }
+            } else {
+              // Add monsters based on current depth
+              if (i % (7 - currentDepth) === 0) {
+                // Select monster based on current dungeon depth
+                const monsterSet = monsters[Math.min(currentDepth - 1, 4)];
+                line2 += `<span class="rogue-monster-${Math.min(currentDepth, 5)}">${monsterSet[i % monsterSet.length]}</span>`;
+              } else {
+                line2 += `<span class="rogue-floor">${space}</span>`;
+              }
+            }
+          }
+          line2 += ` <span class="rogue-wall">${wallVert}</span>`;
+          maze.push(line2);
+          
+          // Line 3: Middle dungeon corridor with monsters
+          let line3 = `  <span class="rogue-wall">${wallVert}</span> `;
+          for (let i = 0; i < width; i++) {
+            if (currentDepth > 1 && i % (8 - currentDepth) === 3) {
+              // Select monster based on current depth
+              const monsterSet = monsters[Math.min(currentDepth - 1, 4)];
+              line3 += `<span class="rogue-monster-${Math.min(currentDepth, 5)}">${monsterSet[(i + 1) % monsterSet.length]}</span>`;
+            } else if (i % 9 === 0) {
+              if (descendingPhase && i > width * 0.8 && infilesProcessed > totalInfiles * 0.8) {
+                // Show amulet near the end of descent
+                line3 += `<span class="rogue-special">${end}</span>`;
+              } else {
+                // Add occasional treasure
+                line3 += `<span class="rogue-item">${treasures[(i/9) % treasures.length]}</span>`;
+              }
+            } else {
+              line3 += `<span class="rogue-floor">${space}</span>`;
+            }
+          }
+          line3 += ` <span class="rogue-wall">${wallVert}</span>`;
+          maze.push(line3);
+          
+          // Line 4: Bottom dungeon corridor with monsters and items
+          let line4 = `  <span class="rogue-wall">${wallVert}</span> `;
+          for (let i = 0; i < width; i++) {
+            if (currentDepth > 2 && i % (9 - currentDepth) === 5) {
+              // Harder monsters for higher depth
+              const monsterSet = monsters[Math.min(currentDepth - 1, 4)];
+              line4 += `<span class="rogue-monster-${Math.min(currentDepth, 5)}">${monsterSet[(i + 2) % monsterSet.length]}</span>`;
+            } else if (!descendingPhase && i === playerPos + 3) {
+              // Special item near the player during ascent
+              line4 += '<span class="rogue-special">!</span>'; // Potion
+            } else if (i % 11 === 0) {
+              // Occasional feature
+              const feature = ['^', '!', '=', '%'][i % 4]; // Trap, potion, ring, food
+              line4 += `<span class="rogue-special">${feature}</span>`;
+            } else {
+              line4 += `<span class="rogue-floor">${space}</span>`;
+            }
+          }
+          line4 += ` <span class="rogue-wall">${wallVert}</span>`;
+          maze.push(line4);
+          
+          // Line 5: Display depth and phase info
+          let line5;
+          if (descendingPhase) {
+            // Show stairs down during descent
+            line5 = `  <span class="rogue-wall">${corner}</span> `;
+            line5 += `<span class="rogue-wall">${wall.repeat(playerPos)}</span>`;
+            if (playerPos < width) {
+              line5 += `<span class="rogue-wall">${wall.repeat(width - playerPos)}</span>`;
+            }
+            line5 += ` <span class="rogue-special">${stairs}</span>`;
+          } else {
+            // Show stairs up during ascent
+            line5 = `  <span class="rogue-special">${start}</span> `;
+            line5 += `<span class="rogue-wall">${wall.repeat(width)}</span>`;
+            line5 += ` <span class="rogue-wall">${corner}</span>`;
+          }
+          maze.push(line5);
+          
+          // Stats line showing progress in roguelike style
+          let phaseProgressPercent = Math.round(phaseProgress * 100);
+          let overallProgressPercent = Math.round((infilesProcessed + outfilesProcessed) / (totalInfiles + totalOutfiles) * 100);
+          
+          // Calculate HP based on current phase
+          let hpPercent = descendingPhase ? phaseProgress : (1 - phaseProgress);
+          let hp = '@'.repeat(Math.ceil(hpPercent * 10));
+          
+          let statsLine = `  ${depthDescription} | `;
+          
+          if (descendingPhase) {
+            if (infilesProcessed >= totalInfiles) {
+              statsLine += `Found Amulet! | `;
+            } else {
+              statsLine += `Searching: ${phaseProgressPercent}% | `;
+            }
+            statsLine += `Read: ${infilesProcessed}/${totalInfiles} | Target Files: ${totalOutfiles}`;
+          } else {
+            statsLine += `Escaping: ${phaseProgressPercent}% | Written: ${outfilesProcessed}/${totalOutfiles}`;
+            if (outfilesProcessed >= totalOutfiles) {
+              statsLine += ` | ESCAPED!`;
+            }
+          }
+          
+          statsLine += ` | HP: <span class="rogue-player">${hp}</span>`;
+          maze.push(statsLine);
+          
+          return maze.join('\n');
+        }
+
+        // Update the UI with current state
+        function updateUI() {
+            // Update input fields
+            infilesTotal.value = state.totalInfiles;
+            infilesProcessedInput.value = state.infilesProcessed;
+            outfilesTotal.value = state.maxOutfiles;
+            outfilesDiscoveredInput.value = state.outfilesDiscovered;
+            outfilesProcessedInput.value = state.outfilesProcessed;
+            
+            // Update status text
+            statusText.textContent = state.running ? "Status: Running" : "Status: Paused";
+            readProgress.textContent = `Read Progress: ${state.infilesProcessed} of ${state.totalInfiles} files examined`;
+            writeProgress.textContent = `Write Progress: ${state.outfilesProcessed} of ${state.outfilesDiscovered} files written`;
+            
+            // Enforce workflow constraints in manual controls
+            if (state.infilesProcessed < state.totalInfiles) {
+                outfilesProcessedInput.disabled = true;
+            } else {
+                outfilesProcessedInput.disabled = false;
+            }
+            
+            // Update progress display
+            asciiContainer.innerHTML = generateProgressDungeon(
+                state.infilesProcessed, 
+                state.totalInfiles, 
+                state.outfilesProcessed, 
+                state.maxOutfiles
+            );
+        }
+
+        // Process input files and discover output files
+        function startSimulation() {
+            state.running = true;
+            
+            // Reset counters
+            state.infilesProcessed = 0;
+            state.outfilesDiscovered = 0;
+            state.outfilesProcessed = 0;
+            
+            // Process input files (regular pace)
+            state.infileInterval = setInterval(() => {
+                if (state.infilesProcessed < state.totalInfiles) {
+                    state.infilesProcessed++;
+                    
+                    // Discover output files proportionally
+                    state.outfilesDiscovered = Math.min(
+                        state.maxOutfiles,
+                        Math.floor((state.infilesProcessed / state.totalInfiles) * state.maxOutfiles)
+                    );
+                    
+                    updateUI();
+                    saveState();
+                } else {
+                    clearInterval(state.infileInterval);
+                }
+            }, 500);
+            
+            // Process output files (slower at first, then faster)
+            state.outfileInterval = setInterval(() => {
+                if (state.outfilesProcessed < state.outfilesDiscovered && state.infilesProcessed >= state.totalInfiles) {
+                    // Process files slowly at first, then faster as we progress
+                    const progress = state.outfilesProcessed / state.outfilesDiscovered;
+                    const increment = Math.max(1, Math.floor(progress * 5));
+                    
+                    state.outfilesProcessed += increment;
+                    
+                    if (state.outfilesProcessed > state.outfilesDiscovered) {
+                        state.outfilesProcessed = state.outfilesDiscovered;
+                    }
+                    
+                    updateUI();
+                    saveState();
+                } else if (state.infilesProcessed >= state.totalInfiles && state.outfilesProcessed >= state.outfilesDiscovered) {
+                    // Simulation complete
+                    clearInterval(state.outfileInterval);
+                    state.running = false;
+                    updateUI();
+                }
+            }, 800);
+        }
+
+        // Save state to localStorage
+        function saveState() {
+            localStorage.setItem('totalInfiles', state.totalInfiles);
+            localStorage.setItem('infilesProcessed', state.infilesProcessed);
+            localStorage.setItem('maxOutfiles', state.maxOutfiles);
+            localStorage.setItem('outfilesDiscovered', state.outfilesDiscovered);
+            localStorage.setItem('outfilesProcessed', state.outfilesProcessed);
+        }
+
+        // Reset the simulation
+        function resetSimulation() {
+            clearInterval(state.infileInterval);
+            clearInterval(state.outfileInterval);
+            
+            // Reset state
+            state.infilesProcessed = 0;
+            state.outfilesDiscovered = 0;
+            state.outfilesProcessed = 0;
+            state.running = false;
+            
+            // Update UI
+            updateUI();
+            
+            // Start the simulation
+            startSimulation();
+        }
+
+        // Complete all files immediately
+        function completeAll() {
+            state.infilesProcessed = state.totalInfiles;
+            state.outfilesDiscovered = state.maxOutfiles;
+            state.outfilesProcessed = state.outfilesDiscovered;
+            state.running = false;
+            clearInterval(state.infileInterval);
+            clearInterval(state.outfileInterval);
+            updateUI();
+        }
+
+        // Toggle pause/resume
+        function togglePauseResume() {
+            state.running = !state.running;
+            
+            if (state.running) {
+                startSimulation();
+            } else {
+                clearInterval(state.infileInterval);
+                clearInterval(state.outfileInterval);
+            }
+        }
+
+        // Update parameters
+        function updateParameters() {
+            state.totalInfiles = parseInt(infilesTotal.value) || 20;
+            state.maxOutfiles = parseInt(outfilesTotal.value) || 50;
+            
+            // Update infiles processed from UI if manually changed
+            const newInfilesProcessed = parseInt(infilesProcessedInput.value) || 0;
+            if (newInfilesProcessed <= state.totalInfiles) {
+                state.infilesProcessed = newInfilesProcessed;
+            }
+            
+            // Update outfiles processed from UI if manually changed and if infiles are complete
+            if (state.infilesProcessed >= state.totalInfiles) {
+                const newOutfilesProcessed = parseInt(outfilesProcessedInput.value) || 0;
+                if (newOutfilesProcessed <= state.maxOutfiles) {
+                    state.outfilesProcessed = newOutfilesProcessed;
+                    state.outfilesDiscovered = Math.max(state.outfilesProcessed, state.outfilesDiscovered);
+                }
+            }
+            
+            updateUI();
+            saveState();
+        }
+
+        // Event listeners
+        resetBtn.addEventListener('click', resetSimulation);
+        completeBtn.addEventListener('click', completeAll);
+        pauseResumeBtn.addEventListener('click', togglePauseResume);
+        updateParamsBtn.addEventListener('click', updateParameters);
+        
+        // Manual input change listeners
+        infilesTotal.addEventListener('change', updateParameters);
+        infilesProcessedInput.addEventListener('change', updateParameters);
+        outfilesTotal.addEventListener('change', updateParameters);
+        outfilesProcessedInput.addEventListener('change', updateParameters);
+
+        // Initialize
+        updateUI();
+        startSimulation();
+    </script>
+</body>
+</html>

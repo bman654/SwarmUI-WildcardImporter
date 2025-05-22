@@ -16,9 +16,14 @@ namespace Spoomples.Extensions.WildcardImporter
     [API.APIClass("API routes related to Wildcard Importer extension")]
     public class WildcardImporterAPI
     {
-        private static readonly WildcardProcessor _processor = new WildcardProcessor();
+        private readonly WildcardProcessor _processor;
+        
+        public WildcardImporterAPI(WildcardProcessor processor)
+        {
+            _processor = processor;
+        }
 
-        public static void Register()
+        public void Register()
         {
             API.RegisterAPICall(ProcessWildcards, true);
             API.RegisterAPICall(GetProcessingStatus);
@@ -31,7 +36,7 @@ namespace Spoomples.Extensions.WildcardImporter
         }
 
         [API.APIDescription("Process wildcard files", "{ success: boolean, message: string, taskId: string }")]
-        public static async Task<JObject> ProcessWildcards([API.APIParameter("Files to process")] string filesJson)
+        public async Task<JObject> ProcessWildcards([API.APIParameter("Files to process")] string filesJson)
         {
             try
             {
@@ -55,15 +60,15 @@ namespace Spoomples.Extensions.WildcardImporter
             }
         }
 
-        [API.APIDescription("Get the status of wildcard processing", "{ status: string, progress: number, conflicts: array }")]
-        public static async Task<JObject> GetProcessingStatus(Session session, string taskId)
+        [API.APIDescription("Get the status of wildcard processing", "{ status: string, conflicts: array, infiles: number, outfiles: number, infilesProcessed: number, outfilesProcessed: number }")]
+        public async Task<JObject> GetProcessingStatus(Session session, string taskId)
         {
             var status = _processor.GetStatus(taskId);
             return JObject.FromObject(status);
         }
 
         [API.APIDescription("Undo the last processing operation", "{ success: boolean, message: string }")]
-        public static async Task<JObject> UndoProcessing(Session session, string taskId)
+        public async Task<JObject> UndoProcessing(Session session, string taskId)
         {
             bool success = await _processor.UndoProcessing(taskId);
             return new JObject
@@ -74,7 +79,7 @@ namespace Spoomples.Extensions.WildcardImporter
         }
 
         [API.APIDescription("Get the history of processing operations", "{ history: array }")]
-        public static async Task<JObject> GetProcessingHistory(Session session)
+        public async Task<JObject> GetProcessingHistory(Session session)
         {
             var history = _processor.GetHistory();
             return new JObject
@@ -84,7 +89,7 @@ namespace Spoomples.Extensions.WildcardImporter
         }
 
         [API.APIDescription("Resolve a file conflict", "{ success: boolean, message: string }")]
-        public static async Task<JObject> ResolveConflict(Session session, string taskId, string filePath, string resolution)
+        public async Task<JObject> ResolveConflict(Session session, string taskId, string filePath, string resolution)
         {
             bool success = await _processor.ResolveConflict(taskId, filePath, resolution);
             return new JObject
@@ -95,7 +100,7 @@ namespace Spoomples.Extensions.WildcardImporter
         }
 
         [API.APIDescription("Get the current destination folder", "{ folderPath: string }")]
-        public static async Task<JObject> GetDestinationFolder(Session session)
+        public async Task<JObject> GetDestinationFolder(Session session)
         {
             string folderPath = _processor.destinationFolder;
             return new JObject
@@ -106,7 +111,7 @@ namespace Spoomples.Extensions.WildcardImporter
 
         // TODO: Implement this
         // [API.APIDescription("Set the destination folder", "{ success: boolean, message: string }")]
-        // public static async Task<JObject> SetDestinationFolder(Session session, string folderPath)
+        // public async Task<JObject> SetDestinationFolder(Session session, string folderPath)
         // {
         //     bool success = _processor.SetDestinationFolder(folderPath);
         //     return new JObject
@@ -117,7 +122,7 @@ namespace Spoomples.Extensions.WildcardImporter
         // }
 
         // TODO: In progress
-        // public static async Task ProcessWildcardsWithStatus(WebSocket socket, Session session,
+        // public async Task ProcessWildcardsWithStatus(WebSocket socket, Session session,
         // [API.APIParameter("The number of images to generate.")] int images,
         // [API.APIParameter("Raw mapping of input should contain general T2I parameters (see listing on Generate tab of main interface) to values, eg `{ \"prompt\": \"a photo of a cat\", \"model\": \"OfficialStableDiffusion/sd_xl_base_1.0\", \"steps\": 20, ... }`. Note that this is the root raw map, ie all params go on the same level as `images`, `session_id`, etc.")] JObject rawInput)
         // {
@@ -166,7 +171,7 @@ namespace Spoomples.Extensions.WildcardImporter
         //     }
         // }
 
-        // private static async Task SendMessageAsync(WebSocket socket, string message)
+        // private async Task SendMessageAsync(WebSocket socket, string message)
         // {
         //     var messageBuffer = Encoding.UTF8.GetBytes(message);
         //     var segment = new ArraySegment<byte>(messageBuffer);
