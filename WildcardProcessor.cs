@@ -98,13 +98,28 @@ namespace Spoomples.Extensions.WildcardImporter
                     await ProcessCollectedFiles(taskId);
 
                     task.Status = ProcessingStatusEnum.Completed;
-                    _history.Add(new ProcessingHistoryItem { TaskId = taskId, Timestamp = DateTime.UtcNow, Description = $"Read {task.InFiles}, wrote {task.OutFilesProcessed} files" });
+                    task.InMemoryFiles.Clear(); // free up some memory
+                    _history.Add(new ProcessingHistoryItem {
+                        TaskId = taskId, 
+                        Timestamp = DateTime.UtcNow, 
+                        Name = String.IsNullOrWhiteSpace(task.Prefix) ? "Wildcard" : task.Prefix.TrimEnd('/'),
+                        Description = $"Read {task.InFiles}, wrote {task.OutFilesProcessed} files" ,
+                        Success = true,
+                    });
                 }
                 catch (Exception ex)
                 {
                     task.Status = ProcessingStatusEnum.Failed;
                     task.Errors.Add($"Error processing files: {ex.Message}");
                     Logs.Error($"Error processing files: {ex.ReadableString()}");
+                    task.InMemoryFiles.Clear(); // free up some memory
+                    _history.Add(new ProcessingHistoryItem {
+                        TaskId = taskId,
+                        Timestamp = DateTime.UtcNow,
+                        Name = String.IsNullOrWhiteSpace(task.Prefix) ? "Wildcard" : task.Prefix.TrimEnd('/'),
+                        Description = string.Join("\n", task.Errors),
+                        Success = false,
+                    });
                 }
             });
 
@@ -329,9 +344,125 @@ namespace Spoomples.Extensions.WildcardImporter
             // : range/quantifier with custom separator.  Pick 2-3 from a|b|c|d: {2-3$$ and $$a|b|c|d}  (" and " is the custom separator)  ==> <random[2-3,]:a|b|c|d>  Ignore the custom separator.  Log a warning that we do not support it. 
             // : weighted options by prepending a number and :: before an option: {a|0.5::b|0.75::c}  The weight is 1 for a, 0.5 for b, and 0.75 for c  ==> <random:a|a|b|b|b|c|c|c|c>
             //      We cannot emit weights.  In our system, all options have weight=1.  So when we encounter this we need to compute the LCM and emit copies of each option so that when you add up all the 1 weights, you get the same relative weights as the original  
+
+            // Process all variants with proper brace matching, including nested variants
+            return ProcessVariants(line);
+        }
+
+        /// <summary>
+        /// Processes all variants in a string, including nested variants.
+        /// </summary>
+        /// <param name="input">The input string containing variants.</param>
+        /// <returns>The processed string with all variants replaced.</returns>
+        private string ProcessVariants(string input)
+        {
+            bool hasVariants = true;
+            string result = input;
             
-            // First handle variants with quantifiers and possible custom separators
-            line = System.Text.RegularExpressions.Regex.Replace(line, @"\{((?:\d+-\d+|-\d+|\d+-|\d+))\$\$(.*?)(?:\$\$)?(.*?)\}", match => 
+            // Keep processing until no more variants are found
+            while (hasVariants)
+            {
+                // Find the next variant
+                (bool found, string processed) = FindAndProcessNextVariant(result);
+                hasVariants = found;
+                if (found)
+                {
+                    result = processed;
+                }
+            }
+            
+            return result;
+        }
+
+        /// <summary>
+        /// Finds and processes the next variant in the input string.
+        /// </summary>
+        /// <param name="input">The input string.</param>
+        /// <returns>A tuple containing: (whether a variant was found, the processed string)</returns>
+        private (bool found, string processed) FindAndProcessNextVariant(string input)
+        {
+            // Find the next opening brace
+            int openBraceIndex = input.IndexOf('{');
+            if (openBraceIndex == -1)
+                return (false, input);
+            
+            // Find the matching closing brace
+            int closeBraceIndex = FindMatchingClosingBrace(input, openBraceIndex);
+            if (closeBraceIndex == -1)
+                return (false, input);
+            
+            // Extract the content inside the braces
+            string fullMatch = input.Substring(openBraceIndex, closeBraceIndex - openBraceIndex + 1);
+            string content = input.Substring(openBraceIndex + 1, closeBraceIndex - openBraceIndex - 1);
+            
+            // Process the content
+            string replacement = ProcessVariantContent(content, fullMatch);
+            
+            // Replace the variant in the original string
+            string result = input.Substring(0, openBraceIndex) + replacement + input.Substring(closeBraceIndex + 1);
+            
+            return (true, result);
+        }
+
+        /// <summary>
+        /// Finds the matching closing brace for an opening brace at the specified index.
+        /// </summary>
+        /// <param name="input">The input string.</param>
+        /// <param name="openBraceIndex">The index of the opening brace.</param>
+        /// <returns>The index of the matching closing brace, or -1 if not found.</returns>
+        private int FindMatchingClosingBrace(string input, int openBraceIndex)
+        {
+            int braceLevel = 1;
+            
+            for (int i = openBraceIndex + 1; i < input.Length; i++)
+            {
+                if (input[i] == '{')
+                    braceLevel++;
+                else if (input[i] == '}')
+                {
+                    braceLevel--;
+                    if (braceLevel == 0)
+                    {
+                        return i;
+                    }
+                }
+            }
+            
+            return -1;
+        }
+
+        /// <summary>
+        /// Processes the content of a variant.
+        /// </summary>
+        /// <param name="content">The content inside the braces.</param>
+        /// <param name="fullMatch">The full match including braces, used for error reporting.</param>
+        /// <returns>The processed content.</returns>
+        private string ProcessVariantContent(string content, string fullMatch)
+        {
+            // Check if it has a quantifier
+            if (content.Contains("$$"))
+            {
+                return ProcessQuantifierVariant(content, fullMatch);
+            }
+            else
+            {
+                // Simple variant without quantifier
+                return ProcessVariantOptions(content, "");
+            }
+        }
+
+        /// <summary>
+        /// Processes a variant with a quantifier.
+        /// </summary>
+        /// <param name="content">The content inside the braces.</param>
+        /// <param name="fullMatch">The full match including braces, used for error reporting.</param>
+        /// <returns>The processed content.</returns>
+        private string ProcessQuantifierVariant(string content, string fullMatch)
+        {
+            // Try to match the quantifier pattern
+            var match = System.Text.RegularExpressions.Regex.Match(content, @"^((?:\d+-\d+|-\d+|\d+-|\d+))\$\$(.*?)(?:\$\$)?(.*)$");
+            
+            if (match.Success)
             {
                 string quantifierSpec = "";
                 string numberPart = match.Groups[1].Value;
@@ -341,31 +472,13 @@ namespace Spoomples.Extensions.WildcardImporter
                 // Log warning if custom separator is found
                 if (!string.IsNullOrEmpty(customSeparator))
                 {
-                    Logs.Warning($"Custom separator in variant not supported: {match.Value}");
+                    Logs.Warning($"Custom separator in variant not supported: {fullMatch}");
                 }
                 
                 // Handle ranges
                 if (numberPart.Contains("-"))
                 {
-                    var rangeParts = numberPart.Split('-');
-                    string lowerBound = rangeParts[0];
-                    string upperBound = rangeParts.Length > 1 ? rangeParts[1] : "";
-                    
-                    // No lower bound case: {-2$$...}
-                    if (string.IsNullOrEmpty(lowerBound))
-                    {
-                        lowerBound = "1";
-                    }
-                    
-                    // No upper bound case: {2-$$...}
-                    if (string.IsNullOrEmpty(upperBound))
-                    {
-                        // Count options to set upper bound
-                        int optionCount = optionsPart.Split('|').Length;
-                        upperBound = optionCount.ToString();
-                    }
-                    
-                    quantifierSpec = $"[{lowerBound}-{upperBound},]";
+                    quantifierSpec = ProcessRangeQuantifier(numberPart, optionsPart);
                 }
                 else
                 {
@@ -374,17 +487,43 @@ namespace Spoomples.Extensions.WildcardImporter
                 }
                 
                 return ProcessVariantOptions(optionsPart, quantifierSpec);
-            });
-            
-            // Then handle simple variants without quantifiers
-            line = System.Text.RegularExpressions.Regex.Replace(line, @"\{([^}]+)\}", match => 
+            }
+            else
             {
-                return ProcessVariantOptions(match.Groups[1].Value, "");
-            });
-
-            return line;
+                // If it doesn't match the quantifier pattern, treat it as a simple variant
+                return ProcessVariantOptions(content, "");
+            }
         }
-        
+
+        /// <summary>
+        /// Processes a range quantifier.
+        /// </summary>
+        /// <param name="numberPart">The number part of the quantifier.</param>
+        /// <param name="optionsPart">The options part of the variant.</param>
+        /// <returns>The processed quantifier specification.</returns>
+        private string ProcessRangeQuantifier(string numberPart, string optionsPart)
+        {
+            var rangeParts = numberPart.Split('-');
+            string lowerBound = rangeParts[0];
+            string upperBound = rangeParts.Length > 1 ? rangeParts[1] : "";
+            
+            // No lower bound case: {-2$$...}
+            if (string.IsNullOrEmpty(lowerBound))
+            {
+                lowerBound = "1";
+            }
+            
+            // No upper bound case: {2-$$...}
+            if (string.IsNullOrEmpty(upperBound))
+            {
+                // Count options to set upper bound
+                int optionCount = optionsPart.Split('|').Length;
+                upperBound = optionCount.ToString();
+            }
+            
+            return $"[{lowerBound}-{upperBound},]";
+        }
+
         private string ProcessWildcardRef(string quantityString, string reference, string taskId)
         {
             var task = _tasks[taskId];
@@ -768,6 +907,8 @@ namespace Spoomples.Extensions.WildcardImporter
         public string TaskId;
         public DateTime Timestamp;
         public string Description;
+        public string Name;
+        public bool Success;
     }
 
     /// <summary>Represents file data sent from the frontend. Can be a file path or a base64 encoded file. This is represented as a file path if the Base64Content is null, and as a base64 encoded file otherwise.</summary>
