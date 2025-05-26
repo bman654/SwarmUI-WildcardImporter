@@ -25,14 +25,14 @@ namespace Spoomples.Extensions.WildcardImporter
 
         public void Register()
         {
-            API.RegisterAPICall(ProcessWildcards, true);
-            API.RegisterAPICall(GetProcessingStatus);
-            API.RegisterAPICall(UndoProcessing);
-            API.RegisterAPICall(GetProcessingHistory);
-            API.RegisterAPICall(ResolveConflict);
-            API.RegisterAPICall(GetDestinationFolder);
-            // API.RegisterAPICall(ProcessWildcardsWithStatus);
-            // API.RegisterAPICall(SetDestinationFolder);
+            API.RegisterAPICall(ProcessWildcards, true, WildcardImporterExtension.WildcardImporterCalls);
+            API.RegisterAPICall(GetProcessingStatus, false, WildcardImporterExtension.WildcardImporterCalls);
+            API.RegisterAPICall(UndoProcessing, true, WildcardImporterExtension.WildcardImporterCalls);
+            API.RegisterAPICall(GetProcessingHistory, false, WildcardImporterExtension.WildcardImporterCalls);
+            API.RegisterAPICall(ResolveConflict, true, WildcardImporterExtension.WildcardImporterCalls);
+            API.RegisterAPICall(GetDestinationFolder, false, WildcardImporterExtension.WildcardImporterCalls);
+            // API.RegisterAPICall(ProcessWildcardsWithStatus, true, WildcardImporterExtension.WildcardImporterCalls);
+            // API.RegisterAPICall(SetDestinationFolder, true, WildcardImporterExtension.WildcardImporterCalls);
         }
 
         [API.APIDescription("Process wildcard files", "{ success: boolean, message: string, taskId: string }")]

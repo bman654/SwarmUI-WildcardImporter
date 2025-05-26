@@ -3,9 +3,16 @@ using SwarmUI.Utils;
 
 namespace Spoomples.Extensions.WildcardImporter
 {
+    using SwarmUI.Accounts;
+
     public class WildcardImporterExtension : Extension
     {
         private WildcardImporterAPI _api = null;
+        
+        public static PermInfoGroup WildcardImporterPermGroup = new("Wildcard Importer", "Permissions related to the Wildcard Importer Extension.");
+        // RISKY because it can overwrite wildcards
+        // RISKY because it can navigate out of Wildcards folder -- I didn't add code to prevent a name with ../ in it for example.
+        public static PermInfo WildcardImporterCalls = Permissions.Register(new("wildcard_importer_calls", "Import Wildcards", "Allows this user to import wildcards via Wildcard Importer Extension.", PermissionDefault.POWERUSERS, WildcardImporterPermGroup, PermSafetyLevel.RISKY));
         
         public override void OnPreInit()
         {
