@@ -207,6 +207,16 @@ function updateStatus(taskId) {
           <p>Write Progress: ${data.OutfilesProcessed} of ${data.Outfiles} files written</p>`
     
     statusDiv.innerHTML = statusContent;
+    
+    if (data.Warnings?.length > 0) {
+      statusDiv.innerHTML += `<h4>Warnings</h4>`;
+      
+      const warningDiv = document.createElement("div");
+      data.Warnings.forEach((warning) => {
+        makeDiv(warning, warningDiv).classList.add("warn");
+      });
+      statusDiv.appendChild(warningDiv);
+    }
 
     if (data.Conflicts?.length > 0) {
       statusDiv.innerHTML += `<h4>Conflicts</h4>`;
@@ -271,9 +281,10 @@ function updateHistory() {
       const historyList = document.createElement("div");
       historyList.classList.add("history-list");
       data.history.forEach(item => {
-        makeDiv("", historyList).classList.add(item.Success ? "pass" : "fail");
+        makeDiv("", historyList).classList.add(item.Success ? (item.Warnings.length > 0 ? "warn" : "pass") : "fail");
         makeDiv(new Date(item.Timestamp).toLocaleString(), historyList)
         makeDiv(item.Name, historyList)
+        makeDiv(`${item.Warnings.length} warnings`, historyList).title = item.Warnings.join("\n");
         makeDiv(item.Description, historyList)
       });
       historyDiv.appendChild(historyList);

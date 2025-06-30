@@ -60,7 +60,7 @@ namespace Spoomples.Extensions.WildcardImporter
             }
         }
 
-        [API.APIDescription("Get the status of wildcard processing", "{ status: string, conflicts: array, infiles: number, outfiles: number, infilesProcessed: number, outfilesProcessed: number }")]
+        [API.APIDescription("Get the status of wildcard processing", "{ status: string, conflicts: array, infiles: number, outfiles: number, infilesProcessed: number, outfilesProcessed: number, warnings: array }")]
         public async Task<JObject> GetProcessingStatus(Session session, string taskId)
         {
             var status = _processor.GetStatus(taskId);

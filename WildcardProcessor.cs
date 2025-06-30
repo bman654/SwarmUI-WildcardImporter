@@ -1,17 +1,8 @@
-using System.Collections.Concurrent;
-using System.Collections.Generic;
 using System.IO;
-using System.Linq;
-using System.Text;
 using System.Text.RegularExpressions;
 using System.IO.Compression;
-using System.Threading.Tasks;
-using Microsoft.AspNetCore.Http;
 using SwarmUI.Core;
 using SwarmUI.Utils;
-
-using FreneticUtilities.FreneticExtensions;
-using FreneticUtilities.FreneticToolkit;
 
 namespace Spoomples.Extensions.WildcardImporter
 {
@@ -76,10 +67,12 @@ namespace Spoomples.Extensions.WildcardImporter
                             }
                             catch (FormatException fe)
                             {
+                                Logs.Error($"Invalid base64 content for file {file.FilePath}: {fe}");
                                 task.Errors.Add($"Invalid base64 content for file {file.FilePath}: {fe.Message}");
                             }
                             catch (Exception ex)
                             {
+                                Logs.Error($"Error collecting {file.FilePath}: {ex}");
                                 task.Errors.Add($"Error collecting {file.FilePath}: {ex.Message}");
                             }
                             finally
@@ -97,15 +90,32 @@ namespace Spoomples.Extensions.WildcardImporter
                     // Second pass: Process wildcard references and write files
                     await ProcessCollectedFiles(taskId);
 
-                    task.Status = ProcessingStatusEnum.Completed;
                     task.InMemoryFiles.Clear(); // free up some memory
-                    _history.Add(new ProcessingHistoryItem {
-                        TaskId = taskId, 
-                        Timestamp = DateTime.UtcNow, 
-                        Name = String.IsNullOrWhiteSpace(task.Prefix) ? "Wildcard" : task.Prefix.TrimEnd('/'),
-                        Description = $"Read {task.InFiles}, wrote {task.OutFilesProcessed} files" ,
-                        Success = true,
-                    });
+                    
+                    if (task.Errors.Count == 0)
+                    {
+                        task.Status = ProcessingStatusEnum.Completed;
+                        _history.Add(new ProcessingHistoryItem {
+                            TaskId = taskId,
+                            Timestamp = DateTime.UtcNow,
+                            Name = String.IsNullOrWhiteSpace(task.Prefix) ? "Wildcard" : task.Prefix.TrimEnd('/'),
+                            Description = $"Read {task.InFiles}, wrote {task.OutFilesProcessed} files",
+                            Success = true,
+                            Warnings = task.Warnings,
+                        });
+                    }
+                    else
+                    {
+                        task.Status = ProcessingStatusEnum.Failed;
+                        _history.Add(new ProcessingHistoryItem {
+                            TaskId = taskId,
+                            Timestamp = DateTime.UtcNow,
+                            Name = String.IsNullOrWhiteSpace(task.Prefix) ? "Wildcard" : task.Prefix.TrimEnd('/'),
+                            Description = string.Join("\n", task.Errors),
+                            Success = false,
+                            Warnings = task.Warnings,
+                        });
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -119,6 +129,7 @@ namespace Spoomples.Extensions.WildcardImporter
                         Name = String.IsNullOrWhiteSpace(task.Prefix) ? "Wildcard" : task.Prefix.TrimEnd('/'),
                         Description = string.Join("\n", task.Errors),
                         Success = false,
+                        Warnings = task.Warnings,
                     });
                 }
             });
@@ -129,27 +140,19 @@ namespace Spoomples.Extensions.WildcardImporter
         private async Task CollectFile(string taskId, string fileName, string filePath)
         {
             var task = _tasks[taskId];
-            try
+            if (fileName.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
             {
-                if (fileName.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
-                {
-                    await CollectZipFile(taskId, filePath);
-                }
-                else if (fileName.EndsWith(".yaml", StringComparison.OrdinalIgnoreCase) || fileName.EndsWith(".yml", StringComparison.OrdinalIgnoreCase))
-                {
-                    string content = await File.ReadAllTextAsync(filePath);
-                    CollectYamlFile(taskId, content, fileName);
-                }
-                else if (fileName.EndsWith(".txt", StringComparison.OrdinalIgnoreCase))
-                {
-                    string content = await File.ReadAllTextAsync(filePath);
-                    CollectTextContent(taskId, content, fileName);
-                }
+                await CollectZipFile(taskId, filePath);
             }
-            catch (Exception ex)
+            else if (fileName.EndsWith(".yaml", StringComparison.OrdinalIgnoreCase) || fileName.EndsWith(".yml", StringComparison.OrdinalIgnoreCase))
             {
-                Logs.Error($"Error collecting {fileName}: {ex.ReadableString()}");
-                task.Errors.Add($"Error collecting {fileName}: {ex.Message}");
+                string content = await File.ReadAllTextAsync(filePath);
+                CollectYamlFile(taskId, content, fileName);
+            }
+            else if (fileName.EndsWith(".txt", StringComparison.OrdinalIgnoreCase))
+            {
+                string content = await File.ReadAllTextAsync(filePath);
+                CollectTextContent(taskId, content, fileName);
             }
         }
 
@@ -162,21 +165,17 @@ namespace Spoomples.Extensions.WildcardImporter
                 {
                     if (entry.FullName.EndsWith(".yaml", StringComparison.OrdinalIgnoreCase) || entry.FullName.EndsWith(".yml", StringComparison.OrdinalIgnoreCase))
                     {
-                        using (var stream = entry.Open())
-                        using (var reader = new StreamReader(stream))
-                        {
-                            string content = await reader.ReadToEndAsync();
-                            CollectYamlFile(taskId, content, entry.FullName);
-                        }
+                        await using var stream = entry.Open();
+                        using var reader = new StreamReader(stream);
+                        string content = await reader.ReadToEndAsync();
+                        CollectYamlFile(taskId, content, entry.FullName);
                     }
                     else if (entry.FullName.EndsWith(".txt", StringComparison.OrdinalIgnoreCase))
                     {
-                        using (var stream = entry.Open())
-                        using (var reader = new StreamReader(stream))
-                        {
-                            string content = await reader.ReadToEndAsync();
-                            CollectTextContent(taskId, content, entry.FullName);
-                        }
+                        await using var stream = entry.Open();
+                        using var reader = new StreamReader(stream);
+                        string content = await reader.ReadToEndAsync();
+                        CollectTextContent(taskId, content, entry.FullName);
                     }
                 }
             }
@@ -265,8 +264,9 @@ namespace Spoomples.Extensions.WildcardImporter
                 // Store in memory with path structure - now using the full path
                 task.InMemoryFiles.TryAdd(currentPath, new List<string> { stringValue });
             }
-            else {
-                Logs.Warning($"Unknown YAML value type: {currentValue.GetType()}");
+            else 
+            {
+                task.AddWarning($"Unknown YAML value type: {currentValue.GetType()}; path: {currentPath}; value: {currentValue}");
             }
         }
 
@@ -331,6 +331,8 @@ namespace Spoomples.Extensions.WildcardImporter
                 string reference = match.Groups[3].Value;
                 return ProcessWildcardRef(quantitySpec, reference, taskId);
             });
+            
+            line = ProcessVariables(line, _tasks[taskId]);
 
             // See https://github.com/adieyal/sd-dynamic-prompts/blob/main/docs/SYNTAX.md#variants
             // Replace {} variants.
@@ -346,15 +348,82 @@ namespace Spoomples.Extensions.WildcardImporter
             //      We cannot emit weights.  In our system, all options have weight=1.  So when we encounter this we need to compute the LCM and emit copies of each option so that when you add up all the 1 weights, you get the same relative weights as the original  
 
             // Process all variants with proper brace matching, including nested variants
-            return ProcessVariants(line);
+            return ProcessVariants(line, _tasks[taskId]);
         }
 
-        /// <summary>
-        /// Processes all variants in a string, including nested variants.
-        /// </summary>
-        /// <param name="input">The input string containing variants.</param>
-        /// <returns>The processed string with all variants replaced.</returns>
-        private string ProcessVariants(string input)
+        private string ProcessVariables(string input, ProcessingTask task)
+        {
+            /*
+             * Variable assignments look like:
+             * - ${variable_name=value} (deferred execution)  -> <setmacro[variable_name,false]:value>
+             * - ${variable_name=!value} (immediate execution) -> <setvar[variable_name,false]:value><setmacro[variable_name,false]:<var:variable_name>>
+             *
+             * Variable access looks like:
+             * - ${variable_name} -> <macro:variable_name>
+             */
+            var result = new StringBuilder(input);
+            var startIndex = 0;
+            
+            while (true)
+            {
+                // Find the next variable pattern
+                var varStartIndex = result.ToString().IndexOf("${", startIndex, StringComparison.Ordinal);
+                if (varStartIndex == -1)
+                    break;
+                
+                // Find the matching closing brace
+                int openBraceIndex = varStartIndex + 1; // +1 to get the index of the actual '{' character
+                int closeBraceIndex = FindMatchingClosingBrace(result.ToString(), openBraceIndex);
+                
+                if (closeBraceIndex == -1)
+                {
+                    // No matching closing brace found, move past this opening and continue
+                    startIndex = varStartIndex + 2;
+                    continue;
+                }
+                
+                // Extract the variable content (without the ${})
+                string varContent = result.ToString().Substring(varStartIndex + 2, closeBraceIndex - varStartIndex - 2);
+                string replacement;
+                
+                // Check if this is a variable assignment or access
+                int equalsIndex = varContent.IndexOf('=');
+                if (equalsIndex != -1)
+                {
+                    // Variable assignment
+                    string varName = varContent.Substring(0, equalsIndex);
+                    string varValue = varContent.Substring(equalsIndex + 1);
+                    
+                    // Immediate or deferred?
+                    if (varValue.StartsWith("!"))
+                    {
+                        varValue = varValue.Substring(1);
+                        replacement = $"<setvar[{varName},false]:{varValue}><setmacro[{varName},false]:<var:{varName}>>";
+                    }
+                    else
+                    {
+                        // deferred
+                        replacement = $"<setmacro[{varName},false]:{varValue}>";
+                    }
+                }
+                else
+                {
+                    // Variable access
+                    replacement = $"<macro:{varContent}>";
+                }
+                
+                // Replace the entire variable expression with the new format
+                result.Remove(varStartIndex, closeBraceIndex - varStartIndex + 1);
+                result.Insert(varStartIndex, replacement);
+                
+                // Update the start index for the next search
+                startIndex = varStartIndex + replacement.Length;
+            }
+            
+            return result.ToString();
+        }
+
+        private string ProcessVariants(string input, ProcessingTask task)
         {
             bool hasVariants = true;
             string result = input;
@@ -363,7 +432,7 @@ namespace Spoomples.Extensions.WildcardImporter
             while (hasVariants)
             {
                 // Find the next variant
-                (bool found, string processed) = FindAndProcessNextVariant(result);
+                (bool found, string processed) = FindAndProcessNextVariant(result, task);
                 hasVariants = found;
                 if (found)
                 {
@@ -379,7 +448,7 @@ namespace Spoomples.Extensions.WildcardImporter
         /// </summary>
         /// <param name="input">The input string.</param>
         /// <returns>A tuple containing: (whether a variant was found, the processed string)</returns>
-        private (bool found, string processed) FindAndProcessNextVariant(string input)
+        private (bool found, string processed) FindAndProcessNextVariant(string input, ProcessingTask task)
         {
             // Find the next opening brace
             int openBraceIndex = input.IndexOf('{');
@@ -396,7 +465,7 @@ namespace Spoomples.Extensions.WildcardImporter
             string content = input.Substring(openBraceIndex + 1, closeBraceIndex - openBraceIndex - 1);
             
             // Process the content
-            string replacement = ProcessVariantContent(content, fullMatch);
+            string replacement = ProcessVariantContent(content, fullMatch, task);
             
             // Replace the variant in the original string
             string result = input.Substring(0, openBraceIndex) + replacement + input.Substring(closeBraceIndex + 1);
@@ -437,12 +506,12 @@ namespace Spoomples.Extensions.WildcardImporter
         /// <param name="content">The content inside the braces.</param>
         /// <param name="fullMatch">The full match including braces, used for error reporting.</param>
         /// <returns>The processed content.</returns>
-        private string ProcessVariantContent(string content, string fullMatch)
+        private string ProcessVariantContent(string content, string fullMatch, ProcessingTask task)
         {
             // Check if it has a quantifier
             if (content.Contains("$$"))
             {
-                return ProcessQuantifierVariant(content, fullMatch);
+                return ProcessQuantifierVariant(content, fullMatch, task);
             }
             else
             {
@@ -457,7 +526,7 @@ namespace Spoomples.Extensions.WildcardImporter
         /// <param name="content">The content inside the braces.</param>
         /// <param name="fullMatch">The full match including braces, used for error reporting.</param>
         /// <returns>The processed content.</returns>
-        private string ProcessQuantifierVariant(string content, string fullMatch)
+        private string ProcessQuantifierVariant(string content, string fullMatch, ProcessingTask task)
         {
             // Try to match the quantifier pattern
             var match = System.Text.RegularExpressions.Regex.Match(content, @"^((?:\d+-\d+|-\d+|\d+-|\d+))\$\$(.*?)(?:\$\$)?(.*)$");
@@ -472,7 +541,7 @@ namespace Spoomples.Extensions.WildcardImporter
                 // Log warning if custom separator is found
                 if (!string.IsNullOrEmpty(customSeparator))
                 {
-                    Logs.Warning($"Custom separator in variant not supported: {fullMatch}");
+                    task.AddWarning($"Custom separator in variant not supported: {fullMatch}");
                 }
                 
                 // Handle ranges
@@ -550,7 +619,7 @@ namespace Spoomples.Extensions.WildcardImporter
             
             if (!matchingPaths.Any())
             {
-                Logs.Warning($"No matches found for glob pattern: {reference}");
+                task.AddWarning($"No matches found for glob pattern: {reference}");
                 // Return the original reference in a way that shows it's a failed glob
                 return $"<wildcard:{task.Prefix + reference}><comment:no glob matches>";
             }
@@ -564,7 +633,7 @@ namespace Spoomples.Extensions.WildcardImporter
                 {
                     return $"<wildcard:{task.Prefix + path}>";
                 }
-                return $"<wildcard[{quantityString}]:{task.Prefix + path}>";
+                return $"<wildcard[{quantityString},]:{task.Prefix + path}>";
             }
             
             // Build a <random> tag with all matches
@@ -671,7 +740,17 @@ namespace Spoomples.Extensions.WildcardImporter
                     options[i] = "<comment:empty>";
                 }
             }
-            
+
+            if (quantifierSpec == "" && options.Length == 1)
+            {
+                return options[0];
+            }
+
+            if (quantifierSpec == "" && options.Length == 0)
+            {
+                return "";
+            }
+
             return $"<random{quantifierSpec}:{string.Join("|", options)}>";
         }
         
@@ -784,7 +863,8 @@ namespace Spoomples.Extensions.WildcardImporter
                     Outfiles = task.InMemoryFiles.Count,
                     InfilesProcessed = task.InFilesProcessed,
                     OutfilesProcessed = task.OutFilesProcessed,
-                    Conflicts = task.Conflicts.ToList()
+                    Conflicts = task.Conflicts.ToList(),
+                    Warnings = task.Warnings.Slice(0, task.Warnings.Count),
                 };
             }
             return new ProgressStatus { Status = "Not Found" };
@@ -872,6 +952,17 @@ namespace Spoomples.Extensions.WildcardImporter
         public string Prefix;
         public ProcessingStatusEnum Status;
         public ConcurrentBag<string> Errors = new();
+        public List<string> Warnings = new();
+
+        public void AddWarning(string warning)
+        {
+            lock (Warnings)
+            {
+                Warnings.Add("Warning: " + warning);
+                Logs.Warning($"WildcardExtension: {warning}");
+            }
+        }
+
         public ConcurrentDictionary<string, string> Backups = new();
         public ConcurrentBag<ConflictInfo> Conflicts = new();
 
@@ -886,6 +977,7 @@ namespace Spoomples.Extensions.WildcardImporter
         public int Outfiles;
         public int InfilesProcessed;
         public int OutfilesProcessed;
+        public List<string> Warnings;
         public List<ConflictInfo> Conflicts;
     }
 
@@ -908,6 +1000,7 @@ namespace Spoomples.Extensions.WildcardImporter
         public DateTime Timestamp;
         public string Description;
         public string Name;
+        public List<string> Warnings;
         public bool Success;
     }
 
