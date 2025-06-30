@@ -71,6 +71,9 @@ namespace Spoomples.Extensions.WildcardImporter
 
         private string Clean(String prompt)
         {
+            // replace newlines with spaces
+            prompt = prompt.Replace("\n", " ");
+            
             // Ensure every "," or ")" has a space after it
             prompt = System.Text.RegularExpressions.Regex.Replace(prompt, @"([,)])(?!\s)", "$1 ");
 
