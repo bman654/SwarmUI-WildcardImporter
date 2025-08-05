@@ -49,6 +49,20 @@ Fifth, enter a wildcard prompt and click Generate!
 <img style="float: right; width: 45%; margin: 0 0 10px 10px;" src="./docs/prompt-utilities-1.png">
 The extension adds a new section to the generation parameters.  Currently there is only one new item in this section.
 
-* Cleanup Prompts - if enabled, then your prompts will be cleaned up.  Extraneous whitespace will be removed.  Newlines will be replaced with spaces.  Unnecessary commas will be removed.  This is really useful when working with wildcards which occsioanlly inject multiple commas.
+* Cleanup Prompts - if enabled, then your prompts will be cleaned up.  Extraneous whitespace will be removed.  Newlines will be replaced with spaces.  Unnecessary commas will be removed.  This is really useful when working with wildcards which occasionally inject multiple commas.
+* AutoBreak - Automatically insert `<break>` tags in long prompts to keep each part <= 75 tokens.  Optimized for booru tag prompting style, this will intelligently look for safe places to break your prompt where it will not split a prompt mid-tag.
+
+With both options enabled, turns a prompt like this:
+
+> <setvar[q]:masterpiece, best quality, absurdres>,
+> scenery, impressionism, oil painting \(medium\), warm lighting, brush strokes, cool colors, blue background, color contrast, glow effect,
+> 1girl, solo, looking_at_viewer, smile, red_eyes, hair_between_eyes, collarbone, ahoge, braid, sidelocks, ass, red_hair, lying, alternate_costume, sky, sleeveless, medium_hair, barefoot, indoors, halo, nail_polish, blurry, feet, toes, pillow, window, single_braid, night, bed, soles, depth_of_field, bed_sheet, arm_support, black_nails, on_stomach, building, star_(sky), night_sky, starry_sky, legs_up, head_rest, pajamas, spaghetti_strap, bare_back, lamp, bedroom, the_pose, feet_up, skyscraper, crossed_ankles, skyline, desk lamp,
+> 
+> <segment:face | hair,0.3, 0.4><var:q>, scenery, impressionism, oil painting \(medium\), warm lighting, brush strokes, cool colors, color contrast, glow effect,
+> portrait, 1girl, looking at viewer, smile, red eyes, hair between eyes, ahoge, braid, sidelocks, red hair, medium hair, single braid
+
+into this:
+
+> masterpiece, best quality, absurdres, scenery, impressionism, oil painting \(medium\) , warm lighting, brush strokes, cool colors, blue background, color contrast, glow effect, 1girl, solo, looking_at_viewer, smile, red_ekyes, hair_between_eyes, collarbone, ahoge, braid, sidelocks, ass, red_hair&lt;break&gt;lying, alternate_costume, sky, sleeveless, medium_hair, barefoot, indoors, halo, nail_polish, blurry, feet, toes, pillow, window, single_braid, night, bed, soles, depth_of_field, bed_sheet, arm_support, black_nails, on_stomach, building, star_(sky) , night_sky&lt;break&gt;starry_sky, legs_up, head_rest, pajamas, spaghetti_strap, bare_back, lamp, bedroom, the_pose, feet_up, skyscraper, crossed_ankles, skyline, desk lamp<segment:face | hair,0.3, 0.4//cid=11>masterpiece, best quality, absurdres, scenery, impressionism, oil painting \(medium\) , warm lighting, brush strokes, cool colors, color contrast, glow effect, portrait, 1girl, looking at viewer, smile, red eyes, hair between eyes, ahoge, braid, sidelocks, red hair, medium hair, single braid
 
 <div style="clear: both;"></div>
