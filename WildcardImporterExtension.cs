@@ -53,50 +53,49 @@ namespace Spoomples.Extensions.WildcardImporter
             ));
             PromptAutoBreak = T2IParamTypes.Register<bool>(new(
                 Name: "AutoBreak",
-                Description: "Automatically insert <break> tags in long prompts to keep each part <= 75 tokens.\n\nFree yourself from token counting.  Disable if not using CLIP.",
+                Description: "Automatically insert <break> tags in long prompts to keep each part <= 75 tokens.\nOptimized for booru tag prompting style, this will intelligently look for safe places to break your prompt where it will not split a prompt mid-tag.\n\nFree yourself from token counting.  Disable if not using CLIP.",
                 Default: "false",
                 Group: paramGroup,
                 OrderPriority: 1
             ));
 
-            T2IEngine.PreGenerateEvent += @params =>
-            {
-                if (@params.UserInput.InternalSet.Get(PromptCleanup))
+            T2IParamInput.LateSpecialParameterHandlers.Add(userInput => 
                 {
-                    var posPrompt = @params.UserInput.InternalSet.Get(T2IParamTypes.Prompt);
-                    if (posPrompt != null)
+                    // if PromptCleanup is true, run the pos and neg prompts through Clean
+                    if (userInput.InternalSet.Get(PromptCleanup))
                     {
-                        @params.UserInput.InternalSet.Set(T2IParamTypes.Prompt, Clean(posPrompt));
-                    }
+                        var posPrompt = userInput.InternalSet.Get(T2IParamTypes.Prompt);
+                        if (posPrompt != null)
+                        {
+                            userInput.InternalSet.Set(T2IParamTypes.Prompt, Clean(posPrompt));
+                        }
 
-                    var negPrompt = @params.UserInput.InternalSet.Get(T2IParamTypes.NegativePrompt);
-                    if (negPrompt != null)
-                    {
-                        @params.UserInput.InternalSet.Set(T2IParamTypes.NegativePrompt, Clean(negPrompt));
+                        var negPrompt = userInput.InternalSet.Get(T2IParamTypes.NegativePrompt);
+                        if (negPrompt != null)
+                        {
+                            userInput.InternalSet.Set(T2IParamTypes.NegativePrompt, Clean(negPrompt));
+                        }
                     }
-                }
-                // if PromptAutoBreak is true, run the pos and neg prompts through AutoBreak
-                if (@params.UserInput.InternalSet.Get(PromptAutoBreak))
-                {
-                    var posPrompt = @params.UserInput.InternalSet.Get(T2IParamTypes.Prompt);
-                    if (posPrompt != null)
+                    // if PromptAutoBreak is true, run the pos and neg prompts through AutoBreak
+                    if (userInput.InternalSet.Get(PromptAutoBreak))
                     {
-                        @params.UserInput.InternalSet.Set(T2IParamTypes.Prompt, AutoBreak(posPrompt));
-                    }
+                        var posPrompt = userInput.InternalSet.Get(T2IParamTypes.Prompt);
+                        if (posPrompt != null)
+                        {
+                            userInput.InternalSet.Set(T2IParamTypes.Prompt, AutoBreak(posPrompt).Result);
+                        }
 
-                    var negPrompt = @params.UserInput.InternalSet.Get(T2IParamTypes.NegativePrompt);
-                    if (negPrompt != null)
-                    {
-                        @params.UserInput.InternalSet.Set(T2IParamTypes.NegativePrompt, AutoBreak(negPrompt));
+                        var negPrompt = userInput.InternalSet.Get(T2IParamTypes.NegativePrompt);
+                        if (negPrompt != null)
+                        {
+                            userInput.InternalSet.Set(T2IParamTypes.NegativePrompt, AutoBreak(negPrompt).Result);
+                        }
                     }
-                }
-            };
+                });
         }
 
         /// <summary>
-        /// Splits a prompt on tags and applies a transformation function to text segments between tags.
-        /// Tags are enclosed in &lt; and &gt; and can be nested. The method properly handles nested tags
-        /// by counting opening and closing brackets.
+        /// Synchronous version of ForeachPromptSection that applies a transformation function to text segments between tags.
         /// </summary>
         /// <param name="prompt">The input prompt string</param>
         /// <param name="func">Function to transform text segments between tags</param>
@@ -106,7 +105,68 @@ namespace Spoomples.Extensions.WildcardImporter
             if (string.IsNullOrEmpty(prompt))
                 return prompt;
 
+            var segments = ParsePromptSegments(prompt);
             var result = new System.Text.StringBuilder();
+
+            foreach (var segment in segments)
+            {
+                if (segment.IsTag)
+                {
+                    result.Append(segment.Content);
+                }
+                else
+                {
+                    result.Append(func(segment.Content));
+                }
+            }
+
+            return result.ToString();
+        }
+
+        /// <summary>
+        /// Async version of ForeachPromptSection that applies an async transformation function to text segments between tags.
+        /// </summary>
+        /// <param name="prompt">The input prompt string</param>
+        /// <param name="func">Async function to transform text segments between tags</param>
+        /// <returns>The reassembled prompt with transformed text segments and original tags</returns>
+        private async Task<string> ForeachPromptSection(string prompt, Func<string, Task<string>> func)
+        {
+            if (string.IsNullOrEmpty(prompt))
+                return prompt;
+
+            var segments = ParsePromptSegments(prompt);
+            var result = new System.Text.StringBuilder();
+
+            foreach (var segment in segments)
+            {
+                if (segment.IsTag)
+                {
+                    result.Append(segment.Content);
+                }
+                else
+                {
+                    string transformed = await func(segment.Content);
+                    result.Append(transformed);
+                }
+            }
+
+            return result.ToString();
+        }
+
+        /// <summary>
+        /// Represents a segment of a prompt that is either a tag or text content.
+        /// </summary>
+        private record PromptSegment(string Content, bool IsTag);
+
+        /// <summary>
+        /// Parses a prompt into segments, separating tags from text content.
+        /// Tags are enclosed in &lt; and &gt; and can be nested.
+        /// </summary>
+        /// <param name="prompt">The input prompt string</param>
+        /// <returns>List of prompt segments</returns>
+        private List<PromptSegment> ParsePromptSegments(string prompt)
+        {
+            var segments = new List<PromptSegment>();
             int i = 0;
             int textStart = 0;
 
@@ -118,41 +178,25 @@ namespace Spoomples.Extensions.WildcardImporter
                     if (i > textStart)
                     {
                         string textSegment = prompt.Substring(textStart, i - textStart);
-                        result.Append(func(textSegment));
+                        segments.Add(new PromptSegment(textSegment, false));
                     }
 
                     // Find the end of the tag, handling nested tags
-                    int tagStart = i;
-                    int bracketCount = 1;
-                    i++; // Move past the opening '<'
-
-                    while (i < prompt.Length && bracketCount > 0)
+                    var tagInfo = FindCompleteTag(prompt, i);
+                    
+                    if (tagInfo.IsComplete)
                     {
-                        if (prompt[i] == '<')
-                        {
-                            bracketCount++;
-                        }
-                        else if (prompt[i] == '>')
-                        {
-                            bracketCount--;
-                        }
-                        i++;
-                    }
-
-                    // Add the complete tag (including nested content) to result
-                    if (bracketCount == 0)
-                    {
-                        string tag = prompt.Substring(tagStart, i - tagStart);
-                        result.Append(tag);
+                        segments.Add(new PromptSegment(tagInfo.Content, true));
+                        i = tagInfo.EndIndex;
                         textStart = i;
                     }
                     else
                     {
                         // Unclosed tag - treat the '<' as regular text
-                        string textSegment = prompt.Substring(tagStart, 1);
-                        result.Append(func(textSegment));
-                        textStart = tagStart + 1;
-                        i = tagStart + 1;
+                        string textSegment = prompt.Substring(i, 1);
+                        segments.Add(new PromptSegment(textSegment, false));
+                        textStart = i + 1;
+                        i = i + 1;
                     }
                 }
                 else
@@ -165,10 +209,51 @@ namespace Spoomples.Extensions.WildcardImporter
             if (textStart < prompt.Length)
             {
                 string textSegment = prompt.Substring(textStart);
-                result.Append(func(textSegment));
+                segments.Add(new PromptSegment(textSegment, false));
             }
 
-            return result.ToString();
+            return segments;
+        }
+
+        /// <summary>
+        /// Represents information about a tag found in the prompt.
+        /// </summary>
+        private record TagInfo(string Content, int EndIndex, bool IsComplete);
+
+        /// <summary>
+        /// Finds a complete tag starting at the specified position, handling nested tags.
+        /// </summary>
+        /// <param name="prompt">The prompt string</param>
+        /// <param name="startIndex">The starting index of the tag (position of '&lt;')</param>
+        /// <returns>Information about the found tag</returns>
+        private TagInfo FindCompleteTag(string prompt, int startIndex)
+        {
+            int tagStart = startIndex;
+            int bracketCount = 1;
+            int i = startIndex + 1; // Move past the opening '<'
+
+            while (i < prompt.Length && bracketCount > 0)
+            {
+                if (prompt[i] == '<')
+                {
+                    bracketCount++;
+                }
+                else if (prompt[i] == '>')
+                {
+                    bracketCount--;
+                }
+                i++;
+            }
+
+            if (bracketCount == 0)
+            {
+                string tag = prompt.Substring(tagStart, i - tagStart);
+                return new TagInfo(tag, i, true);
+            }
+            else
+            {
+                return new TagInfo("", startIndex + 1, false);
+            }
         }
 
         private string Clean(String prompt)
@@ -188,17 +273,23 @@ namespace Spoomples.Extensions.WildcardImporter
             textSegment = System.Text.RegularExpressions.Regex.Replace(textSegment, @"\s{2,}", " ");
 
             // Replace 2+ ", " with single ", "
-            textSegment = System.Text.RegularExpressions.Regex.Replace(textSegment, @"(,\s*)+", ", ");
-
+            textSegment = System.Text.RegularExpressions.Regex.Replace(textSegment, @"(\s*,\s*)+", ", ");
+            
             // Remove leading and trailing ", " and " "
             textSegment = textSegment.Trim(' ', ',');
 
             return textSegment;
         }
         
-        private string AutoBreak(String prompt)
+        /// <summary>
+        /// Processes a prompt by automatically breaking up text segments that exceed 75 tokens.
+        /// Uses async token counting for better performance.
+        /// </summary>
+        /// <param name="prompt">The prompt to process</param>
+        /// <returns>The processed prompt with auto-break tags</returns>
+        private async Task<string> AutoBreak(String prompt)
         {
-            return ForeachPromptSection(prompt, segment => AutoBreakTextSegment(segment).Result);
+            return await ForeachPromptSection(prompt, segment => AutoBreakTextSegment(segment));
         }
 
         /// <summary>
