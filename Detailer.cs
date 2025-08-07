@@ -176,6 +176,53 @@ public static class Detailer
         }
     }
 
+    private static T2IRegisteredParam<bool> SaveDetailMask, DetailDynamicResolution;
+    private static T2IRegisteredParam<string> DetailSortOrder, DetailTargetResolution;
+    private static T2IRegisteredParam<int> DetailMaskBlur, DetailMaskGrow, DetailMaskOversize, DetailSteps;
+    private static T2IRegisteredParam<double> DetailThresholdMax, DetailCFGScale;
+    private static T2IRegisteredParam<T2IModel> DetailModel;
+    private static T2IParamGroup GroupDetailRefining, GroupDetailOverrides;
+    public static void AddT2IParameters()
+    {
+        GroupDetailRefining = new("WC Detailer", Open: false, OrderPriority: 9.5, IsAdvanced: false);
+        SaveDetailMask = T2IParamTypes.Register<bool>(new("WC Save Detail Mask", $"If checked, any usage of '<{DIRECTIVE}:>' syntax in prompts will save the generated mask in output.",
+            "false", IgnoreIf: "false", Group: GroupDetailRefining, OrderPriority: 3
+            ));
+        DetailMaskBlur = T2IParamTypes.Register<int>(new("WC Detail Mask Blur", $"Amount of blur to apply to the detail mask before using it.\nThis is for '<{DIRECTIVE}:>' syntax usage.\nDefaults to 10.\nCan be overridden by '<{DIRECTIVE}:[blur:10]>' syntax.",
+            "10", Min: 0, Max: 64, Group: GroupDetailRefining, Examples: ["0", "4", "8", "16"], Toggleable: true, OrderPriority: 4
+            ));
+        DetailMaskGrow = T2IParamTypes.Register<int>(new("WC Detail Mask Grow", $"Number of pixels of grow the detail mask by.\nThis is for '<{DIRECTIVE}:>' syntax usage.\nDefaults to 16.\nCan be overridden by '<{DIRECTIVE}:somemask + 16>' syntax.",
+            "16", Min: 0, Max: 512, Group: GroupDetailRefining, Examples: ["0", "4", "8", "16", "32"], Toggleable: true, OrderPriority: 5
+            ));
+        DetailMaskOversize = T2IParamTypes.Register<int>(new("WC Detail Mask Oversize", $"How wide a detail mask should be oversized by.\nLarger values include more context to get more accurate inpaint,\nand smaller values get closer to get better details.",
+            "16", Min: 0, Max: 512, Toggleable: true, OrderPriority: 5.5, Group: GroupDetailRefining, Examples: ["0", "8", "32"]
+            ));
+        DetailThresholdMax = T2IParamTypes.Register<double>(new("WC Detail Threshold Max", "Maximum mask match value of a detail mask before clamping.\nLower values force more of the mask to be counted as maximum masking.\nToo-low values may include unwanted areas of the image.\nHigher values may soften the mask.",
+            "1", Min: 0, Max: 1, Step: 0.05, Toggleable: true, ViewType: ParamViewType.SLIDER, Group: GroupDetailRefining, OrderPriority: 6
+            ));
+        DetailSortOrder = T2IParamTypes.Register<string>(new("WC Detail Sort Order", $"How to sort detail mask features when using '<{DIRECTIVE}:somemask[1]' syntax with indices.\nFor example: <{DIRECTIVE}:yolo-face_yolov8m-seg_60.pt[2]> with largest-smallest, will select the second largest face feature.",
+            "left-right", IgnoreIf: "left-right", GetValues: _ => ["left-right", "right-left", "top-bottom", "bottom-top", "largest-smallest", "smallest-largest"], Group: GroupDetailRefining, OrderPriority: 7
+            ));
+        DetailTargetResolution = T2IParamTypes.Register<string>(new("WC Detail Target Resolution", "Optional specific target resolution for the detailer.\nThis controls both aspect ratio, and size.\nThis is just a target, the system may fail to exactly hit it.\nIf the mask is on the edge of an image, the aspect may be squished.\nIf unspecified, the aspect ratio of the detection will be used, and the resolution of the model.",
+            "1024x1024", Toggleable: true, Group: GroupDetailRefining, OrderPriority: 20
+            ));
+        DetailDynamicResolution = T2IParamTypes.Register<bool>(new("WC Detail Dynamic Target Resolution", $"If checked, DC Target Resolution will be treated as a minimum resolution hint.\nActual target resolution will be dynamically determined to be roughly at least as many pixels as Target Resolution but with an aspect ratio closer to the mask.\n  This maximizes the amount of pixels available for detailing the masked area.\nIf the mask is higher resolution than the Target, then the mask resolution will be used.",
+            "false", IgnoreIf: "false", Group: GroupDetailRefining, OrderPriority: 21
+        ));
+
+        GroupDetailOverrides = new("WC Detail Param Overrides", Toggles: false, Open: false, OrderPriority: 50, IsAdvanced: true, Description: "This sub-group of the WC Detailer group contains core-parameter overrides, such as replacing the base Step count or CFG Scale, unique to the WC Detail generation stage.", Parent: GroupDetailRefining);
+        DetailModel = T2IParamTypes.Register<T2IModel>(new("WC Detail Model", $"Optionally specify a distinct model to use for '{DIRECTIVE}' values.",
+            "", Toggleable: true, Subtype: "Stable-Diffusion", Group: GroupDetailOverrides, OrderPriority: 2, IsAdvanced: true
+            ));
+        DetailSteps = T2IParamTypes.Register<int>(new("WC Detail Steps", "Alternate Steps value for when calculating the WC Detail stage.\nThis replaces the 'Steps' total count before calculating the WC Detail Creativity.",
+            "40", Min: 1, Max: 200, ViewMax: 100, Step: 1, Examples: ["20", "40", "60"], OrderPriority: 4, Toggleable: true, IsAdvanced: true, Group: GroupDetailOverrides, ViewType: ParamViewType.SLIDER
+            ));
+        DetailCFGScale = T2IParamTypes.Register<double>(new("WC Detail CFG Scale", "For the WC Detail model independently of the base model, how strongly to scale prompt input.\nHigher CFG scales tend to produce more contrast, and lower CFG scales produce less contrast.\n"
+                                                                                + "Too-high values can cause corrupted/burnt images, too-low can cause nonsensical images.\n7 is a good baseline. Normal usages vary between 4 and 9.\nSome model types, such as Turbo, expect CFG around 1.",
+            "7", Min: 0, Max: 100, ViewMax: 20, Step: 0.5, Examples: ["5", "6", "7", "8", "9"], OrderPriority: 5, ViewType: ParamViewType.SLIDER, Group: GroupDetailOverrides, ChangeWeight: -3, Toggleable: true, IsAdvanced: true
+            ));
+    }
+
     public static void Register(string FilePath)
     {
         PromptRegion.RegisterCustomPrefix(DIRECTIVE);
@@ -183,6 +230,7 @@ public static class Detailer
         var NodeFolder = Path.Join(FilePath, "WCNodes");
         ComfyUISelfStartBackend.CustomNodePaths.Add(NodeFolder);
         Logs.Init($"Adding {NodeFolder} to CustomNodePaths");
+        AddT2IParameters();
         
         WorkflowGeneratorSteps.AddStep(g => 
         { 
@@ -195,7 +243,7 @@ public static class Detailer
                 }
                 T2IModel t2iModel = g.FinalLoadedModel;
                 JArray model = g.FinalModel, clip = g.FinalClip, vae = g.FinalVae;
-                if (g.UserInput.TryGet(T2IParamTypes.SegmentModel, out T2IModel segmentModel))
+                if (g.UserInput.TryGet(DetailModel, out T2IModel segmentModel))
                 {
                     if (segmentModel.ModelClass?.CompatClass != t2iModel.ModelClass?.CompatClass)
                     {
@@ -209,7 +257,7 @@ public static class Detailer
                 }
                 PromptRegion negativeRegion = new(g.UserInput.Get(T2IParamTypes.NegativePrompt, ""));
                 PromptRegion.Part[] negativeParts = [.. negativeRegion.Parts.Where(p => p.Type == PromptRegion.PartType.CustomPart && p.Prefix == DIRECTIVE)];
-                int growAmt = g.UserInput.Get(T2IParamTypes.SegmentMaskGrow, 16);
+                int growAmt = g.UserInput.Get(DetailMaskGrow, 16);
                 for (int i = 0; i < parts.Length; i++)
                 {
                     PromptRegion.Part part = parts[i];
@@ -235,7 +283,7 @@ public static class Detailer
                             ["tapered_corners"] = true
                         });
                     }
-                    if (g.UserInput.Get(T2IParamTypes.SaveSegmentMask, false))
+                    if (g.UserInput.Get(SaveDetailMask, false))
                     {
                         string imageNode = g.CreateNode("MaskToImage", new JObject()
                         {
@@ -243,8 +291,8 @@ public static class Detailer
                         });
                         g.CreateImageSaveNode([imageNode, 0], g.GetStableDynamicID(50000, 0));
                     }
-                    int oversize = g.UserInput.Get(T2IParamTypes.SegmentMaskOversize, 16);
-                    g.MaskShrunkInfo = g.CreateImageMaskCrop([segmentNode, 0], g.FinalImageOut, oversize, vae, g.FinalLoadedModel, thresholdMax: g.UserInput.Get(T2IParamTypes.SegmentThresholdMax, 1));
+                    int oversize = g.UserInput.Get(DetailMaskOversize, 16);
+                    g.MaskShrunkInfo = CreateImageMaskCrop(g, [segmentNode, 0], g.FinalImageOut, oversize, vae, g.FinalLoadedModel, thresholdMax: g.UserInput.Get(DetailThresholdMax, 1));
                     g.EnableDifferential();
                     if (part.ContextID > 0)
                     {
@@ -253,10 +301,10 @@ public static class Detailer
                     JArray prompt = g.CreateConditioning(part.Prompt, clip, t2iModel, true);
                     string neg = negativeParts.FirstOrDefault(p => p.DataText == part.DataText)?.Prompt ?? negativeRegion.GlobalPrompt;
                     JArray negPrompt = g.CreateConditioning(neg, clip, t2iModel, false);
-                    int steps = g.UserInput.Get(T2IParamTypes.SegmentSteps, g.UserInput.Get(T2IParamTypes.RefinerSteps, g.UserInput.Get(T2IParamTypes.Steps)));
+                    int steps = g.UserInput.Get(DetailSteps, g.UserInput.Get(T2IParamTypes.RefinerSteps, g.UserInput.Get(T2IParamTypes.Steps)));
                     int startStep = (int)Math.Round(steps * (1 - detailerParams.Creativity));
                     long seed = g.UserInput.Get(T2IParamTypes.Seed) + 2 + i;
-                    double cfg = g.UserInput.Get(T2IParamTypes.SegmentCFGScale, g.UserInput.Get(T2IParamTypes.RefinerCFGScale, g.UserInput.Get(T2IParamTypes.CFGScale)));
+                    double cfg = g.UserInput.Get(DetailCFGScale, g.UserInput.Get(T2IParamTypes.RefinerCFGScale, g.UserInput.Get(T2IParamTypes.CFGScale)));
                     string sampler = g.CreateKSampler(model, prompt, negPrompt, [g.MaskShrunkInfo.MaskedLatent, 0], cfg, steps, startStep, 10000, seed, false, true);
                     string decoded = g.CreateVAEDecode(vae, [sampler, 0]);
                     g.FinalImageOut = g.RecompositeCropped(g.MaskShrunkInfo.BoundsNode, [g.MaskShrunkInfo.CroppedMask, 0], g.FinalImageOut, [decoded, 0]);
@@ -267,4 +315,58 @@ public static class Detailer
             // same priority as <segment>
             5);
     }
+    
+    public static WorkflowGenerator.ImageMaskCropData CreateImageMaskCrop(WorkflowGenerator g, JArray mask, JArray image, int growBy, JArray vae, T2IModel model, double threshold = 0.01, double thresholdMax = 1)
+    {
+        if (threshold > 0)
+        {
+            string thresholded = g.CreateNode("SwarmMaskThreshold", new JObject()
+            {
+                ["mask"] = mask,
+                ["min"] = threshold,
+                ["max"] = thresholdMax
+            });
+            mask = [thresholded, 0];
+        }
+        bool dynamicRes = g.UserInput.Get(DetailDynamicResolution, false);
+        string targetRes = g.UserInput.Get(DetailTargetResolution, "0x0");
+        (string targetWidth, string targetHeight) = targetRes.BeforeAndAfter('x');
+        int targetX = int.Parse(targetWidth);
+        int targetY = int.Parse(targetHeight);
+        bool isCustomRes = targetX > 0 && targetY > 0;
+        string boundsNode = g.CreateNode("WCMaskBounds", new JObject()
+        {
+            ["mask"] = mask,
+            ["grow"] = growBy,
+            ["aspect_x"] = isCustomRes ? targetX : 0,
+            ["aspect_y"] = isCustomRes ? targetY : 0,
+            ["dynamic"] = dynamicRes
+        });
+        string croppedImage = g.CreateNode("SwarmImageCrop", new JObject()
+        {
+            ["image"] = image,
+            ["x"] = new JArray() { boundsNode, 0 },
+            ["y"] = new JArray() { boundsNode, 1 },
+            ["width"] = new JArray() { boundsNode, 2 },
+            ["height"] = new JArray() { boundsNode, 3 }
+        });
+        string croppedMask = g.CreateNode("CropMask", new JObject()
+        {
+            ["mask"] = mask,
+            ["x"] = new JArray() { boundsNode, 0 },
+            ["y"] = new JArray() { boundsNode, 1 },
+            ["width"] = new JArray() { boundsNode, 2 },
+            ["height"] = new JArray() { boundsNode, 3 }
+        });
+        string scaledImage = g.CreateNode("SwarmImageScaleForMP", new JObject()
+        {
+            ["image"] = new JArray() { croppedImage, 0 },
+            ["width"] = isCustomRes ? targetX : model?.StandardWidth <= 0 ? g.UserInput.GetImageWidth() : model.StandardWidth,
+            ["height"] = isCustomRes ? targetY : model?.StandardHeight <= 0 ? g.UserInput.GetImageHeight() : model.StandardHeight,
+            ["can_shrink"] = !dynamicRes
+        });
+        JArray encoded = g.DoMaskedVAEEncode(vae, [scaledImage, 0], [croppedMask, 0], null);
+        return new(boundsNode, croppedMask, $"{encoded[0]}", scaledImage);
+    }
+
 }
