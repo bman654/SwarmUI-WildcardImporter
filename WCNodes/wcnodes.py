@@ -89,7 +89,39 @@ class WCMaskBounds:
         return (int(x_start), int(y_start), int(x_end - x_start), int(y_end - y_start))
 
 
+class WCSkipIfMaskEmpty:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "mask": ("MASK",),
+                "image_if_empty": ("IMAGE",{"lazy": True}),
+                "image_if_not_empty": ("IMAGE",{"lazy": True}),
+            }
+        }
+
+    CATEGORY = "WC/masks"
+    RETURN_TYPES = ("IMAGE",)
+    FUNCTION = "route"
+    DESCRIPTION = "If the mask is empty, returns the 'image_if_empty' image. Otherwise, returns the 'image_if_not_empty' image.  Only evaluates the input image that is going to be returned."
+
+    def check_lazy_status(self, mask, image_if_empty, image_if_not_empty):
+        mask_max = mask.max()
+        if mask_max == 0 and image_if_empty is None:
+            return ["image_if_empty"]
+        elif mask_max > 0 and image_if_not_empty is None:
+            return ["image_if_not_empty"]
+        return []
+    
+    def route(self, mask, image_if_empty, image_if_not_empty):
+        mask_max = mask.max()
+        if mask_max == 0:
+            return (image_if_empty,)
+        else:
+            return (image_if_not_empty,)
+
 NODE_CLASS_MAPPINGS = {
     "WCCompositeMask": WCCompositeMask,
     "WCMaskBounds": WCMaskBounds,
+    "WCSkipIfMaskEmpty": WCSkipIfMaskEmpty,
 }

@@ -312,7 +312,14 @@ public static class Detailer
                     double cfg = g.UserInput.Get(DetailCFGScale, g.UserInput.Get(T2IParamTypes.RefinerCFGScale, g.UserInput.Get(T2IParamTypes.CFGScale)));
                     string sampler = g.CreateKSampler(model, prompt, negPrompt, [g.MaskShrunkInfo.MaskedLatent, 0], cfg, steps, startStep, 10000, seed, false, true);
                     string decoded = g.CreateVAEDecode(vae, [sampler, 0]);
-                    g.FinalImageOut = g.RecompositeCropped(g.MaskShrunkInfo.BoundsNode, [g.MaskShrunkInfo.CroppedMask, 0], g.FinalImageOut, [decoded, 0]);
+                    var recompositedImage = g.RecompositeCropped(g.MaskShrunkInfo.BoundsNode, [g.MaskShrunkInfo.CroppedMask, 0], g.FinalImageOut, [decoded, 0]);
+                    var conditionalImage = g.CreateNode("WCSkipIfMaskEmpty", new JObject()
+                    {
+                        ["mask"] = new JArray() { segmentNode, 0 },
+                        ["image_if_empty"] = g.FinalImageOut,
+                        ["image_if_not_empty"] = recompositedImage,
+                    });
+                    g.FinalImageOut = [conditionalImage, 0];
                     g.MaskShrunkInfo = new(null, null, null, null);
                 }
             }
