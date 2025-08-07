@@ -149,9 +149,14 @@ public static class Detailer
                     ["mask"] = new JArray() { GenerateMaskNodes(g, invertMask.Mask), 0 },
                 });
             case GrowMask growMask:
+                var maskNode = GenerateMaskNodes(g, growMask.Mask);
+                if (growMask.Pixels == 0)
+                {
+                    return maskNode;
+                }
                 return g.CreateNode("GrowMask", new JObject()
                 {
-                    ["mask"] = new JArray() { GenerateMaskNodes(g, growMask.Mask), 0 },
+                    ["mask"] = new JArray() { maskNode, 0 },
                     ["expand"] = growMask.Pixels,
                     ["tapered_corners"] = true
                 });
