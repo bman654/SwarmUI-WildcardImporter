@@ -15,6 +15,33 @@ using SwarmUI.Utils;
 // AST Node Records
 public abstract record MaskSpecifier;
 
+// Context for tracking generated nodes to enable reuse
+public class MaskNodeContext
+{
+    private readonly Dictionary<MaskSpecifier, string> _maskNodes = new();
+    private readonly Dictionary<(YoloMask, int), string> _yoloNodes = new();
+    
+    public bool TryGetNode(MaskSpecifier maskSpecifier, out string nodeId)
+    {
+        return _maskNodes.TryGetValue(maskSpecifier, out nodeId);
+    }
+    
+    public bool TryGetYoloNode(YoloMask yoloMask, int objectIndex, out string nodeId)
+    {
+        return _yoloNodes.TryGetValue((yoloMask, objectIndex), out nodeId);
+    }
+    
+    public void AddNode(MaskSpecifier maskSpecifier, string nodeId)
+    {
+        _maskNodes[maskSpecifier] = nodeId;
+    }
+    
+    public void AddYoloNode(YoloMask yoloMask, int objectIndex, string nodeId)
+    {
+        _yoloNodes[(yoloMask, objectIndex)] = nodeId;
+    }
+}
+
 // Basic mask specifiers
 public record YoloMask(string ModelName, string ClassFilter, double? Threshold = null) : MaskSpecifier;
 public record ClipSegMask(string Text, double? Threshold = null) : MaskSpecifier;
@@ -98,7 +125,41 @@ public static class Detailer
         return (new DetailerParams(blur, creativity), remainingInput);
     }
     
-    private static string GenerateMaskNodes(WorkflowGenerator g, MaskSpecifier maskSpecifier, int objectIndex = 0)
+    // Public entry point that establishes a new context for node reuse
+    public static string GenerateMaskNodes(WorkflowGenerator g, MaskSpecifier maskSpecifier, int objectIndex = 0)
+    {
+        var context = new MaskNodeContext();
+        return GenerateMaskNodes(g, maskSpecifier, context, objectIndex);
+    }
+    
+    private static string GenerateMaskNodes(WorkflowGenerator g, MaskSpecifier maskSpecifier, MaskNodeContext context, int objectIndex = 0)
+    {
+        // For YoloMask, we need to check the YOLO-specific dictionary that includes objectIndex
+        if (maskSpecifier is YoloMask yoloMask)
+        {
+            if (context.TryGetYoloNode(yoloMask, objectIndex, out string yoloNodeId))
+            {
+                return yoloNodeId;
+            }
+            
+            string resultYoloNodeId = GenerateMaskNodesInternal(g, maskSpecifier, context, objectIndex);
+            // Cache the YoloMask node with its objectIndex
+            context.AddYoloNode(yoloMask, objectIndex, resultYoloNodeId);
+            return resultYoloNodeId;
+        }
+        
+        // For non-YOLO masks, use the general dictionary
+        if (context.TryGetNode(maskSpecifier, out string nodeId))
+        {
+            return nodeId;
+        }
+        
+        string resultNodeId = GenerateMaskNodesInternal(g, maskSpecifier, context, objectIndex);
+        context.AddNode(maskSpecifier, resultNodeId);
+        return resultNodeId;
+    }
+
+    private static string GenerateMaskNodesInternal(WorkflowGenerator g, MaskSpecifier maskSpecifier, MaskNodeContext context, int objectIndex = 0)
     {
         switch (maskSpecifier)
         {
@@ -122,7 +183,7 @@ public static class Detailer
             case ThresholdMask thresholdMask:
                 return g.CreateNode("SwarmMaskThreshold", new JObject()
                 {
-                    ["mask"] = GenerateMaskNodes(g, thresholdMask.BaseMask),
+                    ["mask"] = GenerateMaskNodes(g, thresholdMask.BaseMask, context),
                     ["min"] = 0.01,
                     ["max"] = thresholdMask.ThresholdMax
                 });
@@ -140,11 +201,11 @@ public static class Detailer
                 if (indexedMask.Mask is YoloMask)
                 {
                     // yolo model supports indexing directly.  Just pass the index down
-                    return GenerateMaskNodes(g, indexedMask.Mask, indexedMask.Index);
+                    return GenerateMaskNodes(g, indexedMask.Mask, context, indexedMask.Index);
                 }
                 
                 // For non-YOLO masks, use WCSeparateMaskComponents to separate and select features
-                string baseMaskNode = GenerateMaskNodes(g, indexedMask.Mask);
+                string baseMaskNode = GenerateMaskNodes(g, indexedMask.Mask, context);
                 int featureThreshold = g.UserInput.Get(DetailFeatureThreshold, 16);
                 
                 // Optionally grow the mask to merge nearby features before separation
@@ -170,10 +231,10 @@ public static class Detailer
             case InvertMask invertMask:
                 return g.CreateNode("InvertMask", new JObject()
                 {
-                    ["mask"] = new JArray() { GenerateMaskNodes(g, invertMask.Mask), 0 },
+                    ["mask"] = new JArray() { GenerateMaskNodes(g, invertMask.Mask, context), 0 },
                 });
             case GrowMask growMask:
-                var maskNode = GenerateMaskNodes(g, growMask.Mask);
+                var maskNode = GenerateMaskNodes(g, growMask.Mask, context);
                 if (growMask.Pixels == 0)
                 {
                     return maskNode;
@@ -187,15 +248,15 @@ public static class Detailer
             case UnionMask unionMask:
                 return g.CreateNode("WCCompositeMask", new JObject()
                 {
-                    ["mask_a"] = new JArray() { GenerateMaskNodes(g, unionMask.Left), 0 },
-                    ["mask_b"] = new JArray() { GenerateMaskNodes(g, unionMask.Right), 0 },
+                    ["mask_a"] = new JArray() { GenerateMaskNodes(g, unionMask.Left, context), 0 },
+                    ["mask_b"] = new JArray() { GenerateMaskNodes(g, unionMask.Right, context), 0 },
                     ["op"] = "max",
                 });
             case IntersectMask intersectMask:
                 return g.CreateNode("WCCompositeMask", new JObject()
                 {
-                    ["mask_a"] = new JArray() { GenerateMaskNodes(g, intersectMask.Left), 0 },
-                    ["mask_b"] = new JArray() { GenerateMaskNodes(g, intersectMask.Right), 0 },
+                    ["mask_a"] = new JArray() { GenerateMaskNodes(g, intersectMask.Left, context), 0 },
+                    ["mask_b"] = new JArray() { GenerateMaskNodes(g, intersectMask.Right, context), 0 },
                     ["op"] = "min",
                 });
             case BoundingBoxMask boundingBoxMask:
