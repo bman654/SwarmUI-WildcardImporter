@@ -53,7 +53,7 @@ public static class Detailer
         // so we can parse strings like this: [blur:10, creativity:0.5] if it is in the input, if it is
         // not in the input we will use defaults
         
-        int defaultBlur = g.UserInput.Get(T2IParamTypes.SegmentMaskBlur, 10);
+        int defaultBlur = g.UserInput.Get(DetailMaskBlur, 10);
         double defaultCreativity = 0.5;
         
         // Look for parameter block at the start: [param1:value1,param2:value2]
@@ -109,7 +109,7 @@ public static class Detailer
                     ["model_name"] = yoloMask.ModelName,
                     ["index"] = objectIndex,
                     ["class_filter"] = yoloMask.ClassFilter,
-                    ["sort_order"] = g.UserInput.Get(T2IParamTypes.SegmentSortOrder, "left-right"),
+                    ["sort_order"] = g.UserInput.Get(DetailSortOrder, "left-right"),
                     ["threshold"] = Math.Abs(yoloMask.Threshold ?? 0.25),
                 });
             case ClipSegMask clipSegMask:
@@ -127,8 +127,9 @@ public static class Detailer
                     ["max"] = thresholdMask.ThresholdMax
                 });
             case BoxMask boxMask:
-                return g.CreateNode("SwarmSquareMaskFromPercent", new JObject()
+                return g.CreateNode("WCBoxMask", new JObject()
                 {
+                    ["image"] = g.FinalImageOut,
                     ["x"] = boxMask.X,
                     ["y"] = boxMask.Y,
                     ["width"] = boxMask.Width,
@@ -142,7 +143,30 @@ public static class Detailer
                     return GenerateMaskNodes(g, indexedMask.Mask, indexedMask.Index);
                 }
                 
-                throw new NotImplementedException("Have not implemented indexed masks for non-yolo models yet");
+                // For non-YOLO masks, use WCSeparateMaskComponents to separate and select features
+                string baseMaskNode = GenerateMaskNodes(g, indexedMask.Mask);
+                int featureThreshold = g.UserInput.Get(DetailFeatureThreshold, 16);
+                
+                // Optionally grow the mask to merge nearby features before separation
+                string grownMaskNode = baseMaskNode;
+                if (featureThreshold > 0)
+                {
+                    grownMaskNode = g.CreateNode("GrowMask", new JObject()
+                    {
+                        ["mask"] = new JArray() { baseMaskNode, 0 },
+                        ["expand"] = (featureThreshold + 1) / 2,
+                        ["tapered_corners"] = true
+                    });
+                }
+                
+                // Use WCSeparateMaskComponents to separate and select the indexed feature
+                return g.CreateNode("WCSeparateMaskComponents", new JObject()
+                {
+                    ["mask"] = new JArray() { grownMaskNode, 0 },
+                    ["sort_order"] = g.UserInput.Get(DetailSortOrder, "left-right"),
+                    ["index"] = indexedMask.Index - 1,
+                    ["orig_mask"] = new JArray() { baseMaskNode, 0 }
+                });
             case InvertMask invertMask:
                 return g.CreateNode("InvertMask", new JObject()
                 {
@@ -183,7 +207,7 @@ public static class Detailer
 
     private static T2IRegisteredParam<bool> SaveDetailMask, DetailDynamicResolution;
     private static T2IRegisteredParam<string> DetailSortOrder, DetailTargetResolution;
-    private static T2IRegisteredParam<int> DetailMaskBlur, DetailMaskGrow, DetailMaskOversize, DetailSteps;
+    private static T2IRegisteredParam<int> DetailMaskBlur, DetailMaskGrow, DetailMaskOversize, DetailSteps, DetailFeatureThreshold;
     private static T2IRegisteredParam<double> DetailThresholdMax, DetailCFGScale;
     private static T2IRegisteredParam<T2IModel> DetailModel;
     private static T2IParamGroup GroupDetailRefining, GroupDetailOverrides;
@@ -201,6 +225,9 @@ public static class Detailer
             ));
         DetailMaskOversize = T2IParamTypes.Register<int>(new("WC Detail Mask Oversize", $"How wide a detail mask should be oversized by.\nLarger values include more context to get more accurate inpaint,\nand smaller values get closer to get better details.",
             "16", Min: 0, Max: 512, Toggleable: true, OrderPriority: 5.5, Group: GroupDetailRefining, Examples: ["0", "8", "32"]
+            ));
+        DetailFeatureThreshold = T2IParamTypes.Register<int>(new("WC Detail Feature Threshold", $"Number of pixels that can separate masked areas while still considering them as a single feature.\nUsed when using the indexing syntax to extract a feature from a non-YOLO mask.",
+            "16", Min: 0, Max: 128, Group: GroupDetailRefining, Examples: ["0", "4", "8", "16"], Toggleable: true, OrderPriority: 5.7
             ));
         DetailThresholdMax = T2IParamTypes.Register<double>(new("WC Detail Threshold Max", "Maximum mask match value of a detail mask before clamping.\nLower values force more of the mask to be counted as maximum masking.\nToo-low values may include unwanted areas of the image.\nHigher values may soften the mask.",
             "1", Min: 0, Max: 1, Step: 0.05, Toggleable: true, ViewType: ParamViewType.SLIDER, Group: GroupDetailRefining, OrderPriority: 6

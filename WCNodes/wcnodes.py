@@ -1,4 +1,6 @@
-﻿import torch, comfy
+import torch, comfy
+import numpy as np
+from scipy import ndimage
 
 class WCCompositeMask:
     @classmethod
@@ -120,8 +122,210 @@ class WCSkipIfMaskEmpty:
         else:
             return (image_if_not_empty,)
 
+
+class WCSeparateMaskComponents:
+    """
+    Separates a mask into multiple contiguous components.
+    """
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "mask": ("MASK",),
+                "sort_order": (["left-right", "right-left", "top-bottom", "bottom-top", "largest-smallest", "smallest-largest"], ),
+                "index": ("INT", { "default": 0, "min": 0, "max": 256, "step": 1 }),
+            },
+            "optional": {
+                "orig_mask": ("MASK",),
+            }
+        }
+
+    RETURN_TYPES = ("MASK",)
+    RETURN_NAMES = ("mask",)
+    FUNCTION = "separate"
+
+    CATEGORY = "WC/masks"
+
+    def separate(self, mask, sort_order, index, orig_mask=None):
+        """
+        Separates a mask into contiguous components and returns the component at the specified index.
+        
+        Args:
+            mask: Input mask tensor
+            sort_order: How to sort the found components
+            index: Which component to return (0-based)
+            orig_mask: Optional original mask to use for output values
+        
+        Returns:
+            A mask with only the selected component
+        """
+        # Use original mask values if provided, otherwise use input mask
+        source_mask = orig_mask if orig_mask is not None else mask
+        
+        # Get the first batch item (assuming single batch for mask processing)
+        if len(mask.shape) == 3:
+            mask_np = mask[0].cpu().numpy()
+            source_np = source_mask[0].cpu().numpy() if len(source_mask.shape) == 3 else source_mask.cpu().numpy()
+        else:
+            mask_np = mask.cpu().numpy()
+            source_np = source_mask.cpu().numpy()
+        
+        # Create binary mask (values > 0)
+        binary_mask = mask_np > 0
+        
+        # Create 8-connectivity structure (includes diagonals)
+        structure = np.ones((3, 3), dtype=bool)
+        
+        # Find connected components using scipy with 8-connectivity
+        labeled_array, num_features = ndimage.label(binary_mask, structure=structure)
+        
+        if num_features == 0:
+            # No components found, return empty mask
+            return (torch.zeros_like(mask),)
+        
+        # Get component information for sorting
+        components_info = []
+        for i in range(1, num_features + 1):  # Labels start from 1
+            component_mask = labeled_array == i
+            
+            # Calculate properties for sorting
+            coords = np.where(component_mask)
+            if len(coords[0]) == 0:
+                continue
+                
+            # Calculate bounding box and center
+            min_y, max_y = coords[0].min(), coords[0].max()
+            min_x, max_x = coords[1].min(), coords[1].max()
+            center_y = (min_y + max_y) / 2
+            center_x = (min_x + max_x) / 2
+            area = np.sum(component_mask)
+            
+            components_info.append({
+                'label': i,
+                'center_x': center_x,
+                'center_y': center_y,
+                'min_x': min_x,
+                'max_x': max_x,
+                'min_y': min_y,
+                'max_y': max_y,
+                'area': area,
+                'mask': component_mask
+            })
+        
+        if not components_info:
+            # No valid components found
+            return (torch.zeros_like(mask),)
+        
+        # Sort components based on sort_order
+        if sort_order == "left-right":
+            components_info.sort(key=lambda x: x['center_x'])
+        elif sort_order == "right-left":
+            components_info.sort(key=lambda x: x['center_x'], reverse=True)
+        elif sort_order == "top-bottom":
+            components_info.sort(key=lambda x: x['center_y'])
+        elif sort_order == "bottom-top":
+            components_info.sort(key=lambda x: x['center_y'], reverse=True)
+        elif sort_order == "largest-smallest":
+            components_info.sort(key=lambda x: x['area'], reverse=True)
+        elif sort_order == "smallest-largest":
+            components_info.sort(key=lambda x: x['area'])
+        
+        # Check if index is valid
+        if index >= len(components_info):
+            # Index out of range, return empty mask
+            return (torch.zeros_like(mask),)
+        
+        # Get the selected component
+        selected_component = components_info[index]
+        
+        # Create output mask with same dimensions as input
+        result_np = np.zeros_like(source_np)
+        
+        # Copy values from source mask where the selected component exists
+        component_coords = np.where(selected_component['mask'])
+        result_np[component_coords] = source_np[component_coords]
+        
+        # Convert back to tensor with same shape as input
+        if len(mask.shape) == 3:
+            result_tensor = torch.from_numpy(result_np).unsqueeze(0).to(mask.device, dtype=mask.dtype)
+        else:
+            result_tensor = torch.from_numpy(result_np).to(mask.device, dtype=mask.dtype)
+        
+        return (result_tensor,)
+
+class WCBoxMask:
+    """
+    Creates a box mask with dimensions matching the input image.
+    """
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "image": ("IMAGE",),
+                "x": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05, "round": 0.0001, "tooltip": "The x position of the mask as a percentage of the image width."}),
+                "y": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05, "round": 0.0001, "tooltip": "The y position of the mask as a percentage of the image height."}),
+                "width": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.05, "round": 0.0001, "tooltip": "The width of the mask as a percentage of the image width."}),
+                "height": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.05, "round": 0.0001, "tooltip": "The height of the mask as a percentage of the image height."}),
+                "strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "tooltip": "The strength of the mask, ie the value of all masked pixels, leaving the rest black ie 0."}),
+            }
+        }
+
+    RETURN_TYPES = ("MASK",)
+    RETURN_NAMES = ("mask",)
+    FUNCTION = "create_box_mask"
+    CATEGORY = "WC/masks"
+
+    def create_box_mask(self, image, x, y, width, height, strength):
+        """
+        Creates a box mask with the same dimensions as the input image.
+        
+        Args:
+            image: Input image to get dimensions from
+            x, y: Position as percentage (0.0-1.0) 
+            width, height: Size as percentage (0.0-1.0)
+            strength: Mask value for the box area
+        
+        Returns:
+            A mask tensor with the same height/width as the input image
+        """
+        # Get image dimensions - image is typically (batch, height, width, channels)
+        if len(image.shape) == 4:
+            batch_size, img_height, img_width, channels = image.shape
+        elif len(image.shape) == 3:
+            img_height, img_width, channels = image.shape
+            batch_size = 1
+        else:
+            raise ValueError(f"Unexpected image shape: {image.shape}")
+        
+        # Create mask with same height/width as image
+        mask = torch.zeros((img_height, img_width), dtype=torch.float32, device=image.device)
+        
+        # Calculate pixel coordinates from percentages
+        start_x = int(x * img_width)
+        start_y = int(y * img_height)
+        end_x = int((x + width) * img_width)
+        end_y = int((y + height) * img_height)
+        
+        # Clamp coordinates to image bounds
+        start_x = max(0, min(start_x, img_width))
+        start_y = max(0, min(start_y, img_height))
+        end_x = max(0, min(end_x, img_width))
+        end_y = max(0, min(end_y, img_height))
+        
+        # Fill the box area with the specified strength
+        if end_x > start_x and end_y > start_y:
+            mask[start_y:end_y, start_x:end_x] = strength
+        
+        # Return mask with batch dimension
+        return (mask.unsqueeze(0),)
+
 NODE_CLASS_MAPPINGS = {
     "WCCompositeMask": WCCompositeMask,
     "WCMaskBounds": WCMaskBounds,
     "WCSkipIfMaskEmpty": WCSkipIfMaskEmpty,
+    "WCSeparateMaskComponents": WCSeparateMaskComponents,
+    "WCBoxMask": WCBoxMask,
 }
