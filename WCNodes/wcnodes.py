@@ -322,10 +322,77 @@ class WCBoxMask:
         # Return mask with batch dimension
         return (mask.unsqueeze(0),)
 
+class WCBoundingBoxMask:
+    """
+    Creates a bounding box mask from an input mask. Finds the bounding box of all non-zero pixels
+    in the input mask and returns a mask where everything inside the bounding box is 1 and everything outside is 0.
+    """
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "mask": ("MASK",),
+            }
+        }
+
+    RETURN_TYPES = ("MASK",)
+    RETURN_NAMES = ("mask",)
+    FUNCTION = "create_bounding_box_mask"
+    CATEGORY = "WC/masks"
+
+    def create_bounding_box_mask(self, mask):
+        """
+        Creates a bounding box mask from the input mask.
+        
+        Args:
+            mask: Input mask tensor to find bounding box for
+        
+        Returns:
+            A mask tensor where the bounding box area is filled with 1.0 and everything else is 0.0
+        """
+        # Handle batch dimension - mask is typically (batch, height, width)
+        if len(mask.shape) == 3:
+            batch_size, height, width = mask.shape
+        elif len(mask.shape) == 2:
+            height, width = mask.shape
+            batch_size = 1
+            mask = mask.unsqueeze(0)
+        else:
+            raise ValueError(f"Unexpected mask shape: {mask.shape}")
+        
+        # Process each mask in the batch
+        output_masks = []
+        for i in range(batch_size):
+            current_mask = mask[i]
+            
+            # Find non-zero pixels
+            nonzero_indices = torch.nonzero(current_mask > 0, as_tuple=False)
+            
+            if len(nonzero_indices) == 0:
+                # If mask is empty, return empty mask
+                bbox_mask = torch.zeros((height, width), dtype=torch.float32, device=mask.device)
+            else:
+                # Find bounding box coordinates
+                min_y = torch.min(nonzero_indices[:, 0]).item()
+                max_y = torch.max(nonzero_indices[:, 0]).item()
+                min_x = torch.min(nonzero_indices[:, 1]).item()
+                max_x = torch.max(nonzero_indices[:, 1]).item()
+                
+                # Create bounding box mask
+                bbox_mask = torch.zeros((height, width), dtype=torch.float32, device=mask.device)
+                bbox_mask[min_y:max_y+1, min_x:max_x+1] = 1.0
+            
+            output_masks.append(bbox_mask)
+        
+        # Stack back into batch format
+        result = torch.stack(output_masks, dim=0)
+        return (result,)
+
 NODE_CLASS_MAPPINGS = {
     "WCCompositeMask": WCCompositeMask,
     "WCMaskBounds": WCMaskBounds,
     "WCSkipIfMaskEmpty": WCSkipIfMaskEmpty,
     "WCSeparateMaskComponents": WCSeparateMaskComponents,
     "WCBoxMask": WCBoxMask,
+    "WCBoundingBoxMask": WCBoundingBoxMask,
 }

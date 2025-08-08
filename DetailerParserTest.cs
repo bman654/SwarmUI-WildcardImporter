@@ -68,7 +68,7 @@ public class DetailerParserTest
                 new IntersectMask(new ClipSegMask("face"), new ClipSegMask("hair"))),
             
             // Bounding box function
-            new("bbox(face)", "Bounding box of face", 
+            new("box(face)", "Bounding box of face", 
                 new BoundingBoxMask(new ClipSegMask("face"))),
             
             // CRITICAL PRECEDENCE TESTS - These should reveal parser bugs
@@ -97,10 +97,10 @@ public class DetailerParserTest
                 new InvertMask(new UnionMask(new ClipSegMask("face"), new ClipSegMask("hair")))),
             
             // Nested expressions
-            new("bbox(face | hair)", "Bounding box of union", 
+            new("box(face | hair)", "Bounding box of union", 
                 new BoundingBoxMask(new UnionMask(new ClipSegMask("face"), new ClipSegMask("hair")))),
             
-            new("face & bbox(hair)", "Intersection with bounding box", 
+            new("face & box(hair)", "Intersection with bounding box", 
                 new IntersectMask(new ClipSegMask("face"), new BoundingBoxMask(new ClipSegMask("hair")))),
             
             new("(face & yolo-person(classes))[2]", "Complex expression with index", 
@@ -115,7 +115,7 @@ public class DetailerParserTest
                     new UnionMask(new ClipSegMask("face"), new ClipSegMask("hair")), 
                     1)),
             
-            new("bbox(face)[3]", "Bounding box with index", 
+            new("box(face)[3]", "Bounding box with index", 
                 new IndexedMask(new BoundingBoxMask(new ClipSegMask("face")), 3)),
             
             new("(face + 5)[2]", "Grown mask with index", 

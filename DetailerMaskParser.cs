@@ -148,11 +148,7 @@ public class DetailerMaskParser
         
         if (functionName == "box")
         {
-            return ParseBoxFunction();
-        }
-        else if (functionName == "bbox")
-        {
-            return ParseBboxFunction();
+            return ParseFunctionCall(functionName);
         }
         else if (functionName.StartsWith("yolo-"))
         {
@@ -190,68 +186,128 @@ public class DetailerMaskParser
         }
     }
 
-    private MaskSpecifier ParseBoxFunction()
+    // Helper types and methods for clean argument parsing
+    private struct Maybe<T>
     {
-        SkipWhitespace();
-        if (IsAtEnd() || PeekChar() != '(')
-            throw new InvalidOperationException($"Expected '(' after 'box' at position {_position}");
-            
-        ConsumeChar(); // consume '('
-        SkipWhitespace();
+        public readonly bool HasValue;
+        public readonly T Value;
 
-        if (!TryParseDouble(out double x))
-            throw new InvalidOperationException($"Expected X coordinate at position {_position}");
-            
-        SkipWhitespace();
-        if (IsAtEnd() || PeekChar() != ',')
-            throw new InvalidOperationException($"Expected ',' after X coordinate at position {_position}");
-            
-        ConsumeChar(); // consume ','
-        SkipWhitespace();
+        private Maybe(bool hasValue, T value)
+        {
+            HasValue = hasValue;
+            Value = value;
+        }
 
-        if (!TryParseDouble(out double y))
-            throw new InvalidOperationException($"Expected Y coordinate at position {_position}");
-            
-        SkipWhitespace();
-        if (IsAtEnd() || PeekChar() != ',')
-            throw new InvalidOperationException($"Expected ',' after Y coordinate at position {_position}");
-            
-        ConsumeChar(); // consume ','
-        SkipWhitespace();
+        public static Maybe<T> Some(T value) => new(true, value);
+        public static Maybe<T> None() => new(false, default(T));
 
-        if (!TryParseDouble(out double width))
-            throw new InvalidOperationException($"Expected width at position {_position}");
-            
-        SkipWhitespace();
-        if (IsAtEnd() || PeekChar() != ',')
-            throw new InvalidOperationException($"Expected ',' after width at position {_position}");
-            
-        ConsumeChar(); // consume ','
-        SkipWhitespace();
-
-        if (!TryParseDouble(out double height))
-            throw new InvalidOperationException($"Expected height at position {_position}");
-            
-        SkipWhitespace();
-        if (IsAtEnd() || PeekChar() != ')')
-            throw new InvalidOperationException($"Expected ')' at position {_position}");
-            
-        ConsumeChar(); // consume ')'
-
-        return new BoxMask(x, y, width, height);
+        public TResult Fold<TResult>(Func<T, TResult> onSome, Func<TResult> onNone)
+        {
+            return HasValue ? onSome(Value) : onNone();
+        }
     }
 
-    private MaskSpecifier ParseBboxFunction()
+    private Maybe<T1> TryParseArgs<T1>(Func<T1> tryParse1)
+    {
+        var savedPosition = _position;
+        try
+        {
+            var arg1 = tryParse1();
+            SkipWhitespace();
+            if (!IsAtEnd() && PeekChar() == ')')
+            {
+                ConsumeChar(); // consume ')'
+                return Maybe<T1>.Some(arg1);
+            }
+        }
+        catch
+        {
+            // Parsing failed
+        }
+        
+        _position = savedPosition;
+        return Maybe<T1>.None();
+    }
+
+    private Maybe<(T1, T2, T3, T4)> TryParseArgs<T1, T2, T3, T4>(
+        Func<T1> tryParse1, 
+        Func<T2> tryParse2, 
+        Func<T3> tryParse3, 
+        Func<T4> tryParse4)
+    {
+        var savedPosition = _position;
+        try
+        {
+            var arg1 = tryParse1();
+            SkipWhitespace();
+            if (!IsAtEnd() && PeekChar() == ',')
+            {
+                ConsumeChar(); // consume ','
+                SkipWhitespace();
+                
+                var arg2 = tryParse2();
+                SkipWhitespace();
+                if (!IsAtEnd() && PeekChar() == ',')
+                {
+                    ConsumeChar(); // consume ','
+                    SkipWhitespace();
+                    
+                    var arg3 = tryParse3();
+                    SkipWhitespace();
+                    if (!IsAtEnd() && PeekChar() == ',')
+                    {
+                        ConsumeChar(); // consume ','
+                        SkipWhitespace();
+                        
+                        var arg4 = tryParse4();
+                        SkipWhitespace();
+                        if (!IsAtEnd() && PeekChar() == ')')
+                        {
+                            ConsumeChar(); // consume ')'
+                            return Maybe<(T1, T2, T3, T4)>.Some((arg1, arg2, arg3, arg4));
+                        }
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // Parsing failed
+        }
+        
+        _position = savedPosition;
+        return Maybe<(T1, T2, T3, T4)>.None();
+    }
+
+    private double ParseDoubleArg()
+    {
+        if (!TryParseDouble(out double value))
+            throw new InvalidOperationException($"Expected numeric value at position {_position}");
+        return value;
+    }
+
+    private MaskSpecifier ParseFunctionCall(string functionName)
     {
         SkipWhitespace();
         if (IsAtEnd() || PeekChar() != '(')
-            throw new InvalidOperationException($"Expected '(' after 'bbox' at position {_position}");
+            throw new InvalidOperationException($"Expected '(' after '{functionName}' at position {_position}");
             
         ConsumeChar(); // consume '('
         SkipWhitespace();
 
-        var innerMask = ParseExpression(')');
-        return new BoundingBoxMask(innerMask);
+        // Try to parse as specific function arguments first
+        if (functionName == "box")
+        {
+            // Try to parse box(x,y,width,height) format
+            return TryParseArgs(ParseDoubleArg, ParseDoubleArg, ParseDoubleArg, ParseDoubleArg)
+                .Fold<MaskSpecifier>(
+                    args => new BoxMask(args.Item1, args.Item2, args.Item3, args.Item4),
+                    () => new BoundingBoxMask(ParseExpression(')'))
+                );
+        }
+        
+        // For other functions that don't have coordinate overloads, only support mask expression
+        throw new InvalidOperationException($"Unknown function '{functionName}' at position {_position}");
     }
 
     private MaskSpecifier ParseClipSegMask(string text)

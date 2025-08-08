@@ -25,7 +25,7 @@
 | !maskspecifier      | Invert the specified mask                                                   |
 | maska \| maskb      | union 2 masks together                                                      |
 | maska & maskb       | intersect 2 masks together                                                  |
-| bbox(maskspecifier) | bounding box of the mask                                                    |
+| box(maskspecifier)  | bounding box of the mask                                                    |
 | maska & !maskb      | Example of mask difference (a except b)                                     |
 
 ### Operator Precendence

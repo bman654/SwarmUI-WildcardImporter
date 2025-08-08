@@ -260,7 +260,10 @@ public static class Detailer
                     ["op"] = "min",
                 });
             case BoundingBoxMask boundingBoxMask:
-                throw new NotImplementedException("bounding box mask not implemented");
+                return g.CreateNode("WCBoundingBoxMask", new JObject()
+                {
+                    ["mask"] = new JArray() { GenerateMaskNodes(g, boundingBoxMask.Mask, context), 0 },
+                });
             default:
                 throw new NotImplementedException($"Unknown mask type: {maskSpecifier.GetType().Name}");
         }
