@@ -179,6 +179,10 @@ public class DetailerMaskParser
             var baseMask = new YoloMask(modelName, classFilter);
             return ParseThresholdSuffix(baseMask);
         }
+        else if (functionName == "circle")
+        {
+            return ParseFunctionCall(functionName);
+        }
         else
         {
             // Treat as CLIPSEG mask
@@ -227,6 +231,47 @@ public class DetailerMaskParser
         
         _position = savedPosition;
         return Maybe<T1>.None();
+    }
+
+    private Maybe<(T1, T2, T3)> TryParseArgs<T1, T2, T3>(
+        Func<T1> tryParse1, 
+        Func<T2> tryParse2, 
+        Func<T3> tryParse3)
+    {
+        var savedPosition = _position;
+        try
+        {
+            var arg1 = tryParse1();
+            SkipWhitespace();
+            if (!IsAtEnd() && PeekChar() == ',')
+            {
+                ConsumeChar(); // consume ','
+                SkipWhitespace();
+                
+                var arg2 = tryParse2();
+                SkipWhitespace();
+                if (!IsAtEnd() && PeekChar() == ',')
+                {
+                    ConsumeChar(); // consume ','
+                    SkipWhitespace();
+                    
+                    var arg3 = tryParse3();
+                    SkipWhitespace();
+                    if (!IsAtEnd() && PeekChar() == ')')
+                    {
+                        ConsumeChar(); // consume ')'
+                        return Maybe<(T1, T2, T3)>.Some((arg1, arg2, arg3));
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // Parsing failed
+        }
+        
+        _position = savedPosition;
+        return Maybe<(T1, T2, T3)>.None();
     }
 
     private Maybe<(T1, T2, T3, T4)> TryParseArgs<T1, T2, T3, T4>(
@@ -303,6 +348,15 @@ public class DetailerMaskParser
                 .Fold<MaskSpecifier>(
                     args => new BoxMask(args.Item1, args.Item2, args.Item3, args.Item4),
                     () => new BoundingBoxMask(ParseExpression(')'))
+                );
+        }
+        else if (functionName == "circle")
+        {
+            // Try to parse circle(x,y,radius) format
+            return TryParseArgs(ParseDoubleArg, ParseDoubleArg, ParseDoubleArg)
+                .Fold<MaskSpecifier>(
+                    args => new CircleMask(args.Item1, args.Item2, args.Item3),
+                    () => new BoundingCircleMask(ParseExpression(')'))
                 );
         }
         

@@ -47,6 +47,7 @@ public record YoloMask(string ModelName, string ClassFilter, double? Threshold =
 public record ClipSegMask(string Text, double? Threshold = null) : MaskSpecifier;
 public record ThresholdMask(MaskSpecifier BaseMask, double ThresholdMax) : MaskSpecifier;
 public record BoxMask(double X, double Y, double Width, double Height) : MaskSpecifier;
+public record CircleMask(double X, double Y, double Radius) : MaskSpecifier;
 
 // Mask modifiers/operators
 public record IndexedMask(MaskSpecifier Mask, int Index) : MaskSpecifier;
@@ -55,6 +56,7 @@ public record GrowMask(MaskSpecifier Mask, int Pixels) : MaskSpecifier;
 public record UnionMask(MaskSpecifier Left, MaskSpecifier Right) : MaskSpecifier;
 public record IntersectMask(MaskSpecifier Left, MaskSpecifier Right) : MaskSpecifier;
 public record BoundingBoxMask(MaskSpecifier Mask) : MaskSpecifier;
+public record BoundingCircleMask(MaskSpecifier Mask) : MaskSpecifier;
 
 // Detailer parameters
 public record DetailerParams(int Blur, double Creativity);
@@ -263,6 +265,20 @@ public static class Detailer
                 return g.CreateNode("WCBoundingBoxMask", new JObject()
                 {
                     ["mask"] = new JArray() { GenerateMaskNodes(g, boundingBoxMask.Mask, context), 0 },
+                });
+            case BoundingCircleMask boundingCircleMask:
+                return g.CreateNode("WCBoundingCircleMask", new JObject()
+                {
+                    ["mask"] = new JArray() { GenerateMaskNodes(g, boundingCircleMask.Mask, context), 0 },
+                });
+            case CircleMask circleMask:
+                return g.CreateNode("WCCircleMask", new JObject()
+                {
+                    ["image"] = g.FinalImageOut,
+                    ["x"] = circleMask.X,
+                    ["y"] = circleMask.Y,
+                    ["radius"] = circleMask.Radius,
+                    ["strength"] = 1.0,
                 });
             default:
                 throw new NotImplementedException($"Unknown mask type: {maskSpecifier.GetType().Name}");

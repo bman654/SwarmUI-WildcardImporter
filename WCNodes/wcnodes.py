@@ -388,6 +388,182 @@ class WCBoundingBoxMask:
         result = torch.stack(output_masks, dim=0)
         return (result,)
 
+
+class WCCircleMask:
+    """
+    Creates a circle mask with dimensions matching the input image.
+    """
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "image": ("IMAGE",),
+                "x": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.05, "round": 0.0001, "tooltip": "The x position of the circle center as a percentage of the image width."}),
+                "y": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.05, "round": 0.0001, "tooltip": "The y position of the circle center as a percentage of the image height."}),
+                "radius": ("FLOAT", {"default": 0.2, "min": 0.0, "max": 1.0, "step": 0.05, "round": 0.0001, "tooltip": "The radius of the circle as a percentage of the smaller image dimension."}),
+                "strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "tooltip": "The strength of the mask, ie the value of all masked pixels, leaving the rest black ie 0."}),
+            }
+        }
+
+    RETURN_TYPES = ("MASK",)
+    RETURN_NAMES = ("mask",)
+    FUNCTION = "create_circle_mask"
+    CATEGORY = "WC/masks"
+
+    def create_circle_mask(self, image, x, y, radius, strength):
+        """
+        Creates a circle mask with the same dimensions as the input image.
+        
+        Args:
+            image: Input image to get dimensions from
+            x, y: Center position as percentage (0.0-1.0) 
+            radius: Radius as percentage (0.0-1.0) of smaller dimension
+            strength: Mask value for the circle area
+        
+        Returns:
+            A mask tensor with the same height/width as the input image
+        """
+        # Get image dimensions - image is typically (batch, height, width, channels)
+        if len(image.shape) == 4:
+            batch_size, img_height, img_width, channels = image.shape
+        elif len(image.shape) == 3:
+            img_height, img_width, channels = image.shape
+            batch_size = 1
+        else:
+            raise ValueError(f"Unexpected image shape: {image.shape}")
+        
+        # Create mask with same height/width as image
+        mask = torch.zeros((img_height, img_width), dtype=torch.float32, device=image.device)
+        
+        # Calculate pixel coordinates from percentages
+        center_x = x * img_width
+        center_y = y * img_height
+        # Use smaller dimension for radius calculation to maintain circular shape
+        pixel_radius = radius * min(img_width, img_height)
+        
+        # Create coordinate grids
+        y_coords, x_coords = torch.meshgrid(
+            torch.arange(img_height, dtype=torch.float32, device=image.device),
+            torch.arange(img_width, dtype=torch.float32, device=image.device),
+            indexing='ij'
+        )
+        
+        # Calculate normalized distances to create true circles regardless of aspect ratio
+        # Normalize coordinates to [0,1] range to account for different image dimensions
+        norm_x = (x_coords - center_x) / min(img_width, img_height)
+        norm_y = (y_coords - center_y) / min(img_width, img_height)
+        distances = torch.sqrt(norm_x ** 2 + norm_y ** 2)
+        
+        # Create circle mask - pixels within radius get the strength value
+        circle_mask = (distances <= radius).float() * strength
+        
+        # Return mask with batch dimension
+        return (circle_mask.unsqueeze(0),)
+
+
+class WCBoundingCircleMask:
+    """
+    Creates a bounding circle mask from an input mask. Finds the smallest circle that contains all non-zero pixels
+    in the input mask and returns a mask where everything inside the circle is 1 and everything outside is 0.
+    """
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "mask": ("MASK",),
+            }
+        }
+
+    RETURN_TYPES = ("MASK",)
+    RETURN_NAMES = ("mask",)
+    FUNCTION = "create_bounding_circle_mask"
+    CATEGORY = "WC/masks"
+
+    def create_bounding_circle_mask(self, mask):
+        """
+        Creates a bounding circle mask from the input mask.
+        
+        Args:
+            mask: Input mask tensor to find bounding circle for
+        
+        Returns:
+            A mask tensor where the bounding circle area is filled with 1.0 and everything else is 0.0
+        """
+        # Handle batch dimension
+        if len(mask.shape) == 3:
+            batch_size, height, width = mask.shape
+            output_mask = torch.zeros_like(mask)
+            
+            for b in range(batch_size):
+                single_mask = mask[b]
+                
+                # Find non-zero pixels
+                nonzero_indices = torch.nonzero(single_mask, as_tuple=False)
+                
+                if len(nonzero_indices) > 0:
+                    # Convert to float for calculations
+                    points = nonzero_indices.float()
+                    
+                    # Find center as centroid of all non-zero pixels
+                    center_y = torch.mean(points[:, 0])
+                    center_x = torch.mean(points[:, 1])
+                    
+                    # Find maximum distance from center to any non-zero pixel
+                    distances = torch.sqrt((points[:, 1] - center_x) ** 2 + (points[:, 0] - center_y) ** 2)
+                    radius = torch.max(distances)
+                    
+                    # Create coordinate grids
+                    y_coords, x_coords = torch.meshgrid(
+                        torch.arange(height, dtype=torch.float32, device=mask.device),
+                        torch.arange(width, dtype=torch.float32, device=mask.device),
+                        indexing='ij'
+                    )
+                    
+                    # Calculate distance from center for each pixel
+                    pixel_distances = torch.sqrt((x_coords - center_x) ** 2 + (y_coords - center_y) ** 2)
+                    
+                    # Create circle mask
+                    output_mask[b] = (pixel_distances <= radius).float()
+                
+        elif len(mask.shape) == 2:
+            height, width = mask.shape
+            output_mask = torch.zeros_like(mask)
+            
+            # Find non-zero pixels
+            nonzero_indices = torch.nonzero(mask, as_tuple=False)
+            
+            if len(nonzero_indices) > 0:
+                # Convert to float for calculations
+                points = nonzero_indices.float()
+                
+                # Find center as centroid of all non-zero pixels
+                center_y = torch.mean(points[:, 0])
+                center_x = torch.mean(points[:, 1])
+                
+                # Find maximum distance from center to any non-zero pixel
+                distances = torch.sqrt((points[:, 1] - center_x) ** 2 + (points[:, 0] - center_y) ** 2)
+                radius = torch.max(distances)
+                
+                # Create coordinate grids
+                y_coords, x_coords = torch.meshgrid(
+                    torch.arange(height, dtype=torch.float32, device=mask.device),
+                    torch.arange(width, dtype=torch.float32, device=mask.device),
+                    indexing='ij'
+                )
+                
+                # Calculate distance from center for each pixel
+                pixel_distances = torch.sqrt((x_coords - center_x) ** 2 + (y_coords - center_y) ** 2)
+                
+                # Create circle mask
+                output_mask = (pixel_distances <= radius).float()
+            
+            # Add batch dimension
+            output_mask = output_mask.unsqueeze(0)
+        else:
+            raise ValueError(f"Unexpected mask shape: {mask.shape}")
+        
+        return (output_mask,)
+
 NODE_CLASS_MAPPINGS = {
     "WCCompositeMask": WCCompositeMask,
     "WCMaskBounds": WCMaskBounds,
@@ -395,4 +571,6 @@ NODE_CLASS_MAPPINGS = {
     "WCSeparateMaskComponents": WCSeparateMaskComponents,
     "WCBoxMask": WCBoxMask,
     "WCBoundingBoxMask": WCBoundingBoxMask,
+    "WCCircleMask": WCCircleMask,
+    "WCBoundingCircleMask": WCBoundingCircleMask,
 }
