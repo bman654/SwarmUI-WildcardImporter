@@ -48,6 +48,8 @@ public record ClipSegMask(string Text, double? Threshold = null) : MaskSpecifier
 public record ThresholdMask(MaskSpecifier BaseMask, double ThresholdMax) : MaskSpecifier;
 public record BoxMask(double X, double Y, double Width, double Height) : MaskSpecifier;
 public record CircleMask(double X, double Y, double Radius) : MaskSpecifier;
+public record OvalMask(double X, double Y, double Width, double Height) : MaskSpecifier;
+public record HullMask(MaskSpecifier Mask) : MaskSpecifier;
 
 // Mask modifiers/operators
 public record IndexedMask(MaskSpecifier Mask, int Index) : MaskSpecifier;
@@ -57,6 +59,7 @@ public record UnionMask(MaskSpecifier Left, MaskSpecifier Right) : MaskSpecifier
 public record IntersectMask(MaskSpecifier Left, MaskSpecifier Right) : MaskSpecifier;
 public record BoundingBoxMask(MaskSpecifier Mask) : MaskSpecifier;
 public record BoundingCircleMask(MaskSpecifier Mask) : MaskSpecifier;
+public record BoundingOvalMask(MaskSpecifier Mask) : MaskSpecifier;
 
 // Detailer parameters
 public record DetailerParams(int Blur, double Creativity);
@@ -271,6 +274,12 @@ public static class Detailer
                 {
                     ["mask"] = new JArray() { GenerateMaskNodes(g, boundingCircleMask.Mask, context), 0 },
                 });
+            case BoundingOvalMask boundingOvalMask:
+                return g.CreateNode("WCBoundingOvalMask", new JObject()
+                {
+                    ["mask"] = new JArray() { GenerateMaskNodes(g, boundingOvalMask.Mask, context), 0 },
+                    ["mode"] = "circumscribed",
+                });
             case CircleMask circleMask:
                 return g.CreateNode("WCCircleMask", new JObject()
                 {
@@ -279,6 +288,21 @@ public static class Detailer
                     ["y"] = circleMask.Y,
                     ["radius"] = circleMask.Radius,
                     ["strength"] = 1.0,
+                });
+            case OvalMask ovalMask:
+                return g.CreateNode("WCOvalMask", new JObject()
+                {
+                    ["image"] = g.FinalImageOut,
+                    ["x"] = ovalMask.X,
+                    ["y"] = ovalMask.Y,
+                    ["width"] = ovalMask.Width,
+                    ["height"] = ovalMask.Height,
+                    ["strength"] = 1.0,
+                });
+            case HullMask hullMask:
+                return g.CreateNode("WCHullMask", new JObject()
+                {
+                    ["mask"] = new JArray() { GenerateMaskNodes(g, hullMask.Mask, context), 0 },
                 });
             default:
                 throw new NotImplementedException($"Unknown mask type: {maskSpecifier.GetType().Name}");

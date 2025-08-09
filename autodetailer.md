@@ -17,19 +17,22 @@
 
 ## Mask Modifiers (each of these expressiones is itself a mask specifier
 
-| Example               | Description                                                                                                                  |
-|-----------------------|------------------------------------------------------------------------------------------------------------------------------|
-| (maskspecifier)       | Parens used for grouping and precedence                                                                                      |
-| maskspecifier[N]      | Index operator - take the Nth object found from the mask (1-based indexing)                                                  |
-| maskspecifier+3       | Grow the mask by 3 pixels.                                                                                                   |
-| !maskspecifier        | Invert the specified mask                                                                                                    |
-| maska \| maskb        | union 2 masks together                                                                                                       |
-| maska & maskb         | intersect 2 masks together                                                                                                   |
-| box(maskspecifier)    | bounding box of the mask                                                                                                     |
-| box(x,y,width,height) | box mask at fractional coordinates (0.0-1.0)                                                                                 |
-| circle(maskspecifier) | bounding circle of the mask                                                                                                  |
-| circle(x,y,radius)    | circle mask at fractional coordinates (0.0-1.0)                            |
-| maska & !maskb        | Example of mask difference (a except b)                                                                                      |
+| Example                | Description                                                                 |
+|------------------------|-----------------------------------------------------------------------------|
+| (maskspecifier)        | Parens used for grouping and precedence                                     |
+| maskspecifier[N]       | Index operator - take the Nth object found from the mask (1-based indexing) |
+| maskspecifier+3        | Grow the mask by 3 pixels.                                                  |
+| !maskspecifier         | Invert the specified mask                                                   |
+| maska \| maskb         | union 2 masks together                                                      |
+| maska & maskb          | intersect 2 masks together                                                  |
+| box(maskspecifier)     | bounding box of the mask                                                    |
+| box(x,y,width,height)  | box mask at fractional coordinates (0.0-1.0)                                |
+| circle(maskspecifier)  | bounding circle of the mask                                                 |
+| circle(x,y,radius)     | circle mask at fractional coordinates (0.0-1.0)                             |
+| oval(maskspecifier)    | bounding oval of the mask                                                   |
+| oval(x,y,width,height) | oval mask at fractional coordinates (0.0-1.0)                               |
+| hull(maskspecifier)    | convex hull of the mask                                                     |
+| maska & !maskb         | Example of mask difference (a except b)                                     |
 
 ### Operator Precendence
 

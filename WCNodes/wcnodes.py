@@ -564,6 +564,396 @@ class WCBoundingCircleMask:
         
         return (output_mask,)
 
+
+class WCOvalMask:
+    """
+    Creates an oval mask with dimensions matching the input image.
+    """
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "image": ("IMAGE",),
+                "x": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.05, "round": 0.0001, "tooltip": "The x position of the oval center as a percentage of the image width."}),
+                "y": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.05, "round": 0.0001, "tooltip": "The y position of the oval center as a percentage of the image height."}),
+                "width": ("FLOAT", {"default": 0.3, "min": 0.0, "max": 1.0, "step": 0.05, "round": 0.0001, "tooltip": "The width of the oval as a percentage of the smaller image dimension."}),
+                "height": ("FLOAT", {"default": 0.2, "min": 0.0, "max": 1.0, "step": 0.05, "round": 0.0001, "tooltip": "The height of the oval as a percentage of the smaller image dimension."}),
+                "strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "tooltip": "The strength of the mask, ie the value of all masked pixels, leaving the rest black ie 0."}),
+            }
+        }
+
+    RETURN_TYPES = ("MASK",)
+    RETURN_NAMES = ("mask",)
+    FUNCTION = "create_oval_mask"
+    CATEGORY = "WC/masks"
+
+    def create_oval_mask(self, image, x, y, width, height, strength):
+        """
+        Creates an oval mask with the same dimensions as the input image.
+        
+        Args:
+            image: Input image to get dimensions from
+            x, y: Center position as percentage (0.0-1.0) 
+            width, height: Oval dimensions as percentage (0.0-1.0) of smaller dimension
+            strength: Mask value for the oval area
+        
+        Returns:
+            A mask tensor with the same height/width as the input image
+        """
+        # Get image dimensions - image is typically (batch, height, width, channels)
+        if len(image.shape) == 4:
+            batch_size, img_height, img_width, channels = image.shape
+        elif len(image.shape) == 3:
+            img_height, img_width, channels = image.shape
+            batch_size = 1
+        else:
+            raise ValueError(f"Unexpected image shape: {image.shape}")
+        
+        # Create mask with same height/width as image
+        mask = torch.zeros((img_height, img_width), dtype=torch.float32, device=image.device)
+        
+        # Calculate pixel coordinates from percentages
+        center_x = x * img_width
+        center_y = y * img_height
+        
+        # Create coordinate grids
+        y_coords, x_coords = torch.meshgrid(
+            torch.arange(img_height, dtype=torch.float32, device=image.device),
+            torch.arange(img_width, dtype=torch.float32, device=image.device),
+            indexing='ij'
+        )
+        
+        # Calculate normalized distances to create true ovals regardless of aspect ratio
+        # Normalize coordinates to [0,1] range to account for different image dimensions
+        norm_x = (x_coords - center_x) / min(img_width, img_height)
+        norm_y = (y_coords - center_y) / min(img_width, img_height)
+        
+        # Ellipse equation: (x/a)² + (y/b)² <= 1
+        ellipse_mask = ((norm_x / width) ** 2 + (norm_y / height) ** 2) <= 1.0
+        oval_mask = ellipse_mask.float() * strength
+        
+        # Return mask with batch dimension
+        return (oval_mask.unsqueeze(0),)
+
+
+class WCBoundingOvalMask:
+    """
+    Creates a bounding oval mask from an input mask. Finds the smallest oval that contains all non-zero pixels
+    in the input mask and returns a mask where everything inside the oval is 1 and everything outside is 0.
+    """
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "mask": ("MASK",),
+                "mode": (["circumscribed", "inscribed"], {"default": "circumscribed", "tooltip": "circumscribed: oval contains all corners of bounding box, inscribed: oval fits inside bounding box"}),
+            }
+        }
+
+    RETURN_TYPES = ("MASK",)
+    RETURN_NAMES = ("mask",)
+    FUNCTION = "create_bounding_oval_mask"
+    CATEGORY = "WC/masks"
+
+    def create_bounding_oval_mask(self, mask, mode="circumscribed"):
+        """
+        Creates a bounding oval mask from the input mask.
+        
+        Args:
+            mask: Input mask tensor to find bounding oval for
+            mode: "circumscribed" (contains all corners) or "inscribed" (fits inside bounding box)
+        
+        Returns:
+            A mask tensor where the bounding oval area is filled with 1.0 and everything else is 0.0
+        """
+        # Handle batch dimension
+        if len(mask.shape) == 3:
+            batch_size, height, width = mask.shape
+            output_mask = torch.zeros_like(mask)
+            
+            for b in range(batch_size):
+                single_mask = mask[b]
+                
+                # Find non-zero pixels
+                nonzero_indices = torch.nonzero(single_mask, as_tuple=False)
+                
+                if len(nonzero_indices) > 0:
+                    # Find bounding box of non-zero pixels
+                    min_y = torch.min(nonzero_indices[:, 0]).item()
+                    max_y = torch.max(nonzero_indices[:, 0]).item()
+                    min_x = torch.min(nonzero_indices[:, 1]).item()
+                    max_x = torch.max(nonzero_indices[:, 1]).item()
+                    
+                    # Calculate oval parameters from bounding box
+                    center_x = (min_x + max_x) / 2.0
+                    center_y = (min_y + max_y) / 2.0
+                    
+                    if mode == "circumscribed":
+                        # Oval contains all corners of bounding box
+                        # For an ellipse to contain all corners while maintaining aspect ratio,
+                        # we need to scale the inscribed ellipse by √2
+                        import math
+                        corner_dist_x = (max_x - min_x) / 2.0
+                        corner_dist_y = (max_y - min_y) / 2.0
+                        scale_factor = math.sqrt(2)
+                        oval_width = corner_dist_x * scale_factor
+                        oval_height = corner_dist_y * scale_factor
+                    else:  # inscribed
+                        # Oval fits inside bounding box (original behavior)
+                        oval_width = (max_x - min_x) / 2.0
+                        oval_height = (max_y - min_y) / 2.0
+                    
+                    # Create coordinate grids
+                    y_coords, x_coords = torch.meshgrid(
+                        torch.arange(height, dtype=torch.float32, device=mask.device),
+                        torch.arange(width, dtype=torch.float32, device=mask.device),
+                        indexing='ij'
+                    )
+                    
+                    # Calculate ellipse equation: (x-cx)²/a² + (y-cy)²/b² <= 1
+                    if oval_width > 0 and oval_height > 0:
+                        ellipse_eq = ((x_coords - center_x) / oval_width) ** 2 + ((y_coords - center_y) / oval_height) ** 2
+                        output_mask[b] = (ellipse_eq <= 1.0).float()
+                
+        elif len(mask.shape) == 2:
+            height, width = mask.shape
+            output_mask = torch.zeros_like(mask)
+            
+            # Find non-zero pixels
+            nonzero_indices = torch.nonzero(mask, as_tuple=False)
+            
+            if len(nonzero_indices) > 0:
+                # Find bounding box of non-zero pixels
+                min_y = torch.min(nonzero_indices[:, 0]).item()
+                max_y = torch.max(nonzero_indices[:, 0]).item()
+                min_x = torch.min(nonzero_indices[:, 1]).item()
+                max_x = torch.max(nonzero_indices[:, 1]).item()
+                
+                # Calculate oval parameters from bounding box
+                center_x = (min_x + max_x) / 2.0
+                center_y = (min_y + max_y) / 2.0
+                
+                if mode == "circumscribed":
+                    # Oval contains all corners of bounding box
+                    # For an ellipse to contain all corners while maintaining aspect ratio,
+                    # we need to scale the inscribed ellipse by √2
+                    import math
+                    corner_dist_x = (max_x - min_x) / 2.0
+                    corner_dist_y = (max_y - min_y) / 2.0
+                    scale_factor = math.sqrt(2)
+                    oval_width = corner_dist_x * scale_factor
+                    oval_height = corner_dist_y * scale_factor
+                else:  # inscribed
+                    # Oval fits inside bounding box (original behavior)
+                    oval_width = (max_x - min_x) / 2.0
+                    oval_height = (max_y - min_y) / 2.0
+                
+                # Create coordinate grids
+                y_coords, x_coords = torch.meshgrid(
+                    torch.arange(height, dtype=torch.float32, device=mask.device),
+                    torch.arange(width, dtype=torch.float32, device=mask.device),
+                    indexing='ij'
+                )
+                
+                # Calculate ellipse equation: (x-cx)²/a² + (y-cy)²/b² <= 1
+                if oval_width > 0 and oval_height > 0:
+                    ellipse_eq = ((x_coords - center_x) / oval_width) ** 2 + ((y_coords - center_y) / oval_height) ** 2
+                    output_mask = (ellipse_eq <= 1.0).float()
+            
+            # Add batch dimension
+            output_mask = output_mask.unsqueeze(0)
+        else:
+            raise ValueError(f"Unexpected mask shape: {mask.shape}")
+        
+        return (output_mask,)
+
+class WCHullMask:
+    """
+    Creates a convex hull mask from an input mask. Finds the convex hull of all non-zero pixels
+    in the input mask and returns a mask where everything inside the hull is 1 and everything outside is 0.
+    """
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "mask": ("MASK",),
+            }
+        }
+
+    RETURN_TYPES = ("MASK",)
+    RETURN_NAMES = ("mask",)
+    FUNCTION = "create_hull_mask"
+    CATEGORY = "WC/masks"
+
+    def create_hull_mask(self, mask):
+        """
+        Creates a convex hull mask from the input mask.
+        
+        Args:
+            mask: Input mask tensor to find convex hull for
+        
+        Returns:
+            A mask tensor where the convex hull area is filled with 1.0 and everything else is 0.0
+        """
+        # Handle batch dimension
+        if len(mask.shape) == 3:
+            batch_size, height, width = mask.shape
+            output_mask = torch.zeros_like(mask)
+            
+            for b in range(batch_size):
+                single_mask = mask[b]
+                
+                # Find non-zero pixels
+                nonzero_indices = torch.nonzero(single_mask, as_tuple=False)
+                
+                if len(nonzero_indices) > 0:
+                    # Convert to numpy for convex hull computation
+                    points = nonzero_indices.cpu().numpy()
+                    
+                    # Compute convex hull using Graham scan algorithm
+                    hull_points = self._convex_hull(points)
+                    
+                    if len(hull_points) >= 3:
+                        # Create mask by filling the convex hull polygon
+                        output_mask[b] = self._fill_polygon(hull_points, height, width, mask.device)
+                    elif len(hull_points) > 0:
+                        # If we have fewer than 3 points, just fill those points
+                        for point in hull_points:
+                            y, x = point
+                            if 0 <= y < height and 0 <= x < width:
+                                output_mask[b, y, x] = 1.0
+                
+        elif len(mask.shape) == 2:
+            height, width = mask.shape
+            output_mask = torch.zeros_like(mask)
+            
+            # Find non-zero pixels
+            nonzero_indices = torch.nonzero(mask, as_tuple=False)
+            
+            if len(nonzero_indices) > 0:
+                # Convert to numpy for convex hull computation
+                points = nonzero_indices.cpu().numpy()
+                
+                # Compute convex hull using Graham scan algorithm
+                hull_points = self._convex_hull(points)
+                
+                if len(hull_points) >= 3:
+                    # Create mask by filling the convex hull polygon
+                    output_mask = self._fill_polygon(hull_points, height, width, mask.device)
+                elif len(hull_points) > 0:
+                    # If we have fewer than 3 points, just fill those points
+                    for point in hull_points:
+                        y, x = point
+                        if 0 <= y < height and 0 <= x < width:
+                            output_mask[y, x] = 1.0
+            
+            # Add batch dimension
+            output_mask = output_mask.unsqueeze(0)
+        else:
+            raise ValueError(f"Unexpected mask shape: {mask.shape}")
+        
+        return (output_mask,)
+
+    def _convex_hull(self, points):
+        """
+        Compute convex hull using Graham scan algorithm.
+        Points are in format [[y1, x1], [y2, x2], ...]
+        """
+        if len(points) < 3:
+            return points.tolist()
+        
+        # Convert to (x, y) format for easier computation
+        points_xy = points[:, [1, 0]]  # Swap y,x to x,y
+        
+        # Find the bottom-most point (or left most in case of tie)
+        start_idx = 0
+        for i in range(1, len(points_xy)):
+            if (points_xy[i][1] < points_xy[start_idx][1] or 
+                (points_xy[i][1] == points_xy[start_idx][1] and points_xy[i][0] < points_xy[start_idx][0])):
+                start_idx = i
+        
+        # Swap start point to beginning
+        points_xy[[0, start_idx]] = points_xy[[start_idx, 0]]
+        start_point = points_xy[0]
+        
+        # Sort points by polar angle with respect to start point
+        def polar_angle(p):
+            dx = p[0] - start_point[0]
+            dy = p[1] - start_point[1]
+            import math
+            return math.atan2(dy, dx)
+        
+        # Sort remaining points by polar angle
+        remaining_points = points_xy[1:]
+        remaining_points = remaining_points[remaining_points[:, 0].argsort()]  # Sort by x first for stability
+        remaining_points = sorted(remaining_points, key=polar_angle)
+        
+        # Graham scan
+        hull = [start_point]
+        
+        for point in remaining_points:
+            # Remove points that make a right turn
+            while len(hull) > 1 and self._cross_product(hull[-2], hull[-1], point) <= 0:
+                hull.pop()
+            hull.append(point)
+        
+        # Convert back to (y, x) format and return as integers
+        hull_yx = [[int(p[1]), int(p[0])] for p in hull]
+        return hull_yx
+
+    def _cross_product(self, o, a, b):
+        """Calculate cross product of vectors OA and OB"""
+        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+
+    def _fill_polygon(self, polygon_points, height, width, device):
+        """
+        Fill a polygon using scanline algorithm.
+        polygon_points is a list of [y, x] coordinates.
+        """
+        mask = torch.zeros((height, width), dtype=torch.float32, device=device)
+        
+        if len(polygon_points) < 3:
+            return mask
+        
+        # Create edge list
+        edges = []
+        n = len(polygon_points)
+        for i in range(n):
+            y1, x1 = polygon_points[i]
+            y2, x2 = polygon_points[(i + 1) % n]
+            
+            # Skip horizontal edges
+            if y1 == y2:
+                continue
+                
+            # Ensure y1 < y2
+            if y1 > y2:
+                y1, y2, x1, x2 = y2, y1, x2, x1
+            
+            edges.append((y1, y2, x1, x2))
+        
+        # Scanline fill
+        for y in range(height):
+            intersections = []
+            
+            for y1, y2, x1, x2 in edges:
+                if y1 <= y < y2:
+                    # Calculate x intersection
+                    if y2 != y1:
+                        x_intersect = x1 + (x2 - x1) * (y - y1) / (y2 - y1)
+                        intersections.append(x_intersect)
+            
+            # Sort intersections and fill between pairs
+            intersections.sort()
+            for i in range(0, len(intersections), 2):
+                if i + 1 < len(intersections):
+                    x_start = max(0, int(intersections[i]))
+                    x_end = min(width - 1, int(intersections[i + 1]))
+                    if x_start <= x_end:
+                        mask[y, x_start:x_end + 1] = 1.0
+        
+        return mask
+
 NODE_CLASS_MAPPINGS = {
     "WCCompositeMask": WCCompositeMask,
     "WCMaskBounds": WCMaskBounds,
@@ -573,4 +963,7 @@ NODE_CLASS_MAPPINGS = {
     "WCBoundingBoxMask": WCBoundingBoxMask,
     "WCCircleMask": WCCircleMask,
     "WCBoundingCircleMask": WCBoundingCircleMask,
+    "WCOvalMask": WCOvalMask,
+    "WCBoundingOvalMask": WCBoundingOvalMask,
+    "WCHullMask": WCHullMask,
 }

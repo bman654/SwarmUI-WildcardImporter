@@ -51,6 +51,12 @@ public class DetailerParserTest
             new("circle(0.3,0.4,0.1)[1]", "Circle mask with index", 
                 new IndexedMask(new CircleMask(0.3, 0.4, 0.1), 1)),
             
+            // Oval masks
+            new("oval(0.5,0.5,0.3,0.2)", "Oval mask", 
+                new OvalMask(0.5, 0.5, 0.3, 0.2)),
+            new("oval(0.3,0.4,0.2,0.25)[2]", "Oval mask with index", 
+                new IndexedMask(new OvalMask(0.3, 0.4, 0.2, 0.25), 2)),
+            
             // Invert operator
             new("!face", "Inverted mask", 
                 new InvertMask(new ClipSegMask("face"))),
@@ -82,6 +88,16 @@ public class DetailerParserTest
                 new BoundingCircleMask(new ClipSegMask("face"))),
             new("circle(face | hair)", "Bounding circle of union", 
                 new BoundingCircleMask(new UnionMask(new ClipSegMask("face"), new ClipSegMask("hair")))),
+            
+            // Bounding oval function
+            new("oval(face)", "Bounding oval of face", 
+                new BoundingOvalMask(new ClipSegMask("face"))),
+            new("oval(face | hair)", "Bounding oval of union", 
+                new BoundingOvalMask(new UnionMask(new ClipSegMask("face"), new ClipSegMask("hair")))),
+            new("hull(face)", "Convex hull of face", 
+                new HullMask(new ClipSegMask("face"))),
+            new("hull(face | hair)", "Convex hull of union", 
+                new HullMask(new UnionMask(new ClipSegMask("face"), new ClipSegMask("hair")))),
             
             // CRITICAL PRECEDENCE TESTS - These should reveal parser bugs
             new("face | hair + 5", "Union then grow (should be (face | hair) + 5)", 
@@ -208,12 +224,16 @@ public class DetailerParserTest
                                      Math.Abs(a.Width - e.Width) < 0.001 && Math.Abs(a.Height - e.Height) < 0.001,
             (CircleMask a, CircleMask e) => Math.Abs(a.X - e.X) < 0.001 && Math.Abs(a.Y - e.Y) < 0.001 && 
                                            Math.Abs(a.Radius - e.Radius) < 0.001,
+            (OvalMask a, OvalMask e) => Math.Abs(a.X - e.X) < 0.001 && Math.Abs(a.Y - e.Y) < 0.001 && 
+                                       Math.Abs(a.Width - e.Width) < 0.001 && Math.Abs(a.Height - e.Height) < 0.001,
             (InvertMask a, InvertMask e) => ASTEquals(a.Mask, e.Mask),
             (GrowMask a, GrowMask e) => ASTEquals(a.Mask, e.Mask) && a.Pixels == e.Pixels,
             (UnionMask a, UnionMask e) => ASTEquals(a.Left, e.Left) && ASTEquals(a.Right, e.Right),
             (IntersectMask a, IntersectMask e) => ASTEquals(a.Left, e.Left) && ASTEquals(a.Right, e.Right),
             (BoundingBoxMask a, BoundingBoxMask e) => ASTEquals(a.Mask, e.Mask),
             (BoundingCircleMask a, BoundingCircleMask e) => ASTEquals(a.Mask, e.Mask),
+            (BoundingOvalMask a, BoundingOvalMask e) => ASTEquals(a.Mask, e.Mask),
+            (HullMask a, HullMask e) => ASTEquals(a.Mask, e.Mask),
             (IndexedMask a, IndexedMask e) => ASTEquals(a.Mask, e.Mask) && a.Index == e.Index,
             _ => false
         };
@@ -230,12 +250,15 @@ public class DetailerParserTest
             ThresholdMask thresh => $"{prefix}ThresholdMask(\n{FormatAST(thresh.BaseMask, indent + 1)},\n{prefix}  ThresholdMax: {thresh.ThresholdMax})",
             BoxMask box => $"{prefix}BoxMask(X: {box.X}, Y: {box.Y}, Width: {box.Width}, Height: {box.Height})",
             CircleMask circle => $"{prefix}CircleMask(X: {circle.X}, Y: {circle.Y}, Radius: {circle.Radius})",
+            OvalMask oval => $"{prefix}OvalMask(X: {oval.X}, Y: {oval.Y}, Width: {oval.Width}, Height: {oval.Height})",
             InvertMask invert => $"{prefix}InvertMask(\n{FormatAST(invert.Mask, indent + 1)})",
             GrowMask grow => $"{prefix}GrowMask(\n{FormatAST(grow.Mask, indent + 1)},\n{prefix}  Pixels: {grow.Pixels})",
             UnionMask union => $"{prefix}UnionMask(\n{FormatAST(union.Left, indent + 1)},\n{FormatAST(union.Right, indent + 1)})",
             IntersectMask intersect => $"{prefix}IntersectMask(\n{FormatAST(intersect.Left, indent + 1)},\n{FormatAST(intersect.Right, indent + 1)})",
             BoundingBoxMask bbox => $"{prefix}BoundingBoxMask(\n{FormatAST(bbox.Mask, indent + 1)})",
             BoundingCircleMask bcircle => $"{prefix}BoundingCircleMask(\n{FormatAST(bcircle.Mask, indent + 1)})",
+            BoundingOvalMask boval => $"{prefix}BoundingOvalMask(\n{FormatAST(boval.Mask, indent + 1)})",
+            HullMask hull => $"{prefix}HullMask(\n{FormatAST(hull.Mask, indent + 1)})",
             IndexedMask indexed => $"{prefix}IndexedMask(\n{FormatAST(indexed.Mask, indent + 1)},\n{prefix}  Index: {indexed.Index})",
             _ => $"{prefix}Unknown mask type: {mask.GetType().Name}"
         };

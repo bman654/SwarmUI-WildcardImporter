@@ -183,6 +183,14 @@ public class DetailerMaskParser
         {
             return ParseFunctionCall(functionName);
         }
+        else if (functionName == "oval")
+        {
+            return ParseFunctionCall(functionName);
+        }
+        else if (functionName == "hull")
+        {
+            return ParseFunctionCall(functionName);
+        }
         else
         {
             // Treat as CLIPSEG mask
@@ -358,6 +366,19 @@ public class DetailerMaskParser
                     args => new CircleMask(args.Item1, args.Item2, args.Item3),
                     () => new BoundingCircleMask(ParseExpression(')'))
                 );
+        }
+        else if (functionName == "oval")
+        {
+            // Try to parse oval(x,y,width,height) format
+            return TryParseArgs(ParseDoubleArg, ParseDoubleArg, ParseDoubleArg, ParseDoubleArg)
+                .Fold<MaskSpecifier>(
+                    args => new OvalMask(args.Item1, args.Item2, args.Item3, args.Item4),
+                    () => new BoundingOvalMask(ParseExpression(')'))
+                );
+        }
+        else if (functionName == "hull")
+        {
+            return new HullMask(ParseExpression(')'));
         }
         
         // For other functions that don't have coordinate overloads, only support mask expression
