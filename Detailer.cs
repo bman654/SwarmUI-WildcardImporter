@@ -365,7 +365,7 @@ public static class Detailer
     public static void Register(string FilePath)
     {
         PromptRegion.RegisterCustomPrefix(DIRECTIVE);
-        T2IPromptHandling.PromptTagPostProcessors[DIRECTIVE] = T2IPromptHandling.PromptTagPostProcessors["segment"];
+        T2IPromptHandling.PromptTagBasicProcessors[DIRECTIVE] = T2IPromptHandling.PromptTagBasicProcessors["segment"];
         var NodeFolder = Path.Join(FilePath, "WCNodes");
         ComfyUISelfStartBackend.CustomNodePaths.Add(NodeFolder);
         Logs.Init($"Adding {NodeFolder} to CustomNodePaths");
@@ -460,11 +460,12 @@ public static class Detailer
                     JArray prompt = g.CreateConditioning(part.Prompt, clip, t2iModel, true);
                     string neg = negativeParts.FirstOrDefault(p => p.DataText == part.DataText)?.Prompt ?? negativeRegion.GlobalPrompt;
                     JArray negPrompt = g.CreateConditioning(neg, clip, t2iModel, false);
-                    int steps = g.UserInput.Get(DetailSteps, g.UserInput.Get(T2IParamTypes.RefinerSteps, g.UserInput.Get(T2IParamTypes.Steps)));
+
+                    int steps = g.UserInput.GetNullable(T2IParamTypes.Steps, part.ContextID, false) ?? g.UserInput.GetNullable(DetailSteps, part.ContextID) ?? g.UserInput.GetNullable(T2IParamTypes.RefinerSteps, part.ContextID) ?? g.UserInput.Get(T2IParamTypes.Steps, 20, sectionId: part.ContextID);
                     int startStep = (int)Math.Round(steps * (1 - detailerParams.Creativity));
                     long seed = g.UserInput.Get(T2IParamTypes.Seed) + 2 + i;
-                    double cfg = g.UserInput.Get(DetailCFGScale, g.UserInput.Get(T2IParamTypes.RefinerCFGScale, g.UserInput.Get(T2IParamTypes.CFGScale)));
-                    string sampler = g.CreateKSampler(model, prompt, negPrompt, [g.MaskShrunkInfo.MaskedLatent, 0], cfg, steps, startStep, 10000, seed, false, true);
+                    double cfg = g.UserInput.GetNullable(T2IParamTypes.CFGScale, part.ContextID, false) ?? g.UserInput.GetNullable(DetailCFGScale, part.ContextID) ?? g.UserInput.GetNullable(T2IParamTypes.RefinerCFGScale, part.ContextID) ?? g.UserInput.Get(T2IParamTypes.CFGScale, 7, sectionId: part.ContextID);
+                    string sampler = g.CreateKSampler(model, prompt, negPrompt, [g.MaskShrunkInfo.MaskedLatent, 0], cfg, steps, startStep, 10000, seed, false, true, sectionId: part.ContextID);
                     string decoded = g.CreateVAEDecode(vae, [sampler, 0]);
                     var recompositedImage = g.RecompositeCropped(g.MaskShrunkInfo.BoundsNode, [g.MaskShrunkInfo.CroppedMask, 0], g.FinalImageOut, [decoded, 0]);
                     var conditionalImage = g.CreateNode("WCSkipIfMaskEmpty", new JObject()

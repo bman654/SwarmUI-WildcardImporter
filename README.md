@@ -1,9 +1,10 @@
-# Wildcard Importer Extension for SwarmUI
+# Wildcard Importer & Prompt Utilities Extension for SwarmUI
 
-This extension allows you to import Wildcard collections that you've downloaded from Civit or elsewhere into SwarmUI.
+This extension for [SwarmUI](https://github.com/mcmonkeyprojects/SwarmUI) adds the following features:
 
-It also adds a **Wildcard Importer Prompt Extensions** parameter group to the SwarmUI with some prompt utilities.
-See the _Prompt Utilities_ section below for more information.
+1. Wildcard Importer - allows you to import Wildcard Collections from Civit or elsewhere into SwarmUI.  See below for usage instructions.
+2. Prompt Utilities - adds prompt utilities such as prompt cleanup and auto-breaking. See _Prompt Utilities_ below for more information.
+3. WC Detailer - an advanced automatic segmentation and inpainting feature for SwarmUI.  See [wcdetailer](./wcdetailer.md) for more information.
 
 ## Wildcard Importer
 
