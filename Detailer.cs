@@ -309,8 +309,8 @@ public static class Detailer
         }
     }
 
-    private static T2IRegisteredParam<bool> SaveDetailMask, DetailDynamicResolution;
-    private static T2IRegisteredParam<string> DetailSortOrder, DetailTargetResolution;
+    private static T2IRegisteredParam<bool> DetailDynamicResolution;
+    private static T2IRegisteredParam<string> DetailSortOrder, DetailTargetResolution, SaveDetailMask;
     private static T2IRegisteredParam<int> DetailMaskBlur, DetailMaskGrow, DetailMaskOversize, DetailSteps, DetailFeatureThreshold;
     private static T2IRegisteredParam<double> DetailThresholdMax, DetailCFGScale;
     private static T2IRegisteredParam<T2IModel> DetailModel;
@@ -318,8 +318,11 @@ public static class Detailer
     public static void AddT2IParameters()
     {
         GroupDetailRefining = new("WC Detailer", Open: false, OrderPriority: 9.5, IsAdvanced: false);
-        SaveDetailMask = T2IParamTypes.Register<bool>(new("WC Save Detail Mask", $"If checked, any usage of '<{DIRECTIVE}:>' syntax in prompts will save the generated mask in output.",
-            "false", IgnoreIf: "false", Group: GroupDetailRefining, OrderPriority: 3
+        SaveDetailMask = T2IParamTypes.Register<string>(new("WC Save Detail Mask Style", 
+            $"If set, any usage of '<{DIRECTIVE}:>' syntax in prompts will save the generated mask in output.\nSet to 'MaskOnly' to output the mask with a black background.\nSet to 'MaskAndImage' to output the mask overlayed on top of the input image.",
+            "Disabled", GetValues: (_) => ["Disabled///Disabled", "MaskOnly///MaskOnly", "MaskAndImage///MaskAndImage"]
+            , IgnoreIf: "Disabled", Group: GroupDetailRefining, OrderPriority: 3,
+            HideFromMetadata: true
             ));
         DetailMaskBlur = T2IParamTypes.Register<int>(new("WC Detail Mask Blur", $"Amount of blur to apply to the detail mask before using it.\nThis is for '<{DIRECTIVE}:>' syntax usage.\nDefaults to 10.\nCan be overridden by '<{DIRECTIVE}:[blur:10]>' syntax.",
             "10", Min: 0, Max: 64, Group: GroupDetailRefining, Examples: ["0", "4", "8", "16"], Toggleable: true, OrderPriority: 4
@@ -397,8 +400,18 @@ public static class Detailer
                 for (int i = 0; i < parts.Length; i++)
                 {
                     PromptRegion.Part part = parts[i];
-                    (DetailerParams detailerParams, string maskSpecString) = ParseDetailerParams(g, part.DataText);
-                    MaskSpecifier maskSpec = ParseMaskSpecifier(maskSpecString);
+                    DetailerParams detailerParams;
+                    MaskSpecifier maskSpec;
+                    try
+                    {
+                        (detailerParams, string maskSpecString) = ParseDetailerParams(g, part.DataText);
+                        maskSpec = ParseMaskSpecifier(maskSpecString);
+                    }
+                    catch (Exception ex)
+                    {
+                        Logs.Error($"Error parsing {DIRECTIVE} '<{DIRECTIVE}:{part.DataText}>': " + ex.Message);
+                        continue;
+                    }
                     string segmentNode = GenerateMaskNodes(g, maskSpec);
                     if (detailerParams.Blur > 0)
                     {
@@ -419,10 +432,20 @@ public static class Detailer
                             ["tapered_corners"] = true
                         });
                     }
-                    if (g.UserInput.Get(SaveDetailMask, false))
+                    var saveDetailMask = g.UserInput.Get(SaveDetailMask, "Disabled");
+                    if (saveDetailMask == "MaskOnly")
                     {
                         string imageNode = g.CreateNode("MaskToImage", new JObject()
                         {
+                            ["mask"] = new JArray() { segmentNode, 0 }
+                        });
+                        g.CreateImageSaveNode([imageNode, 0], g.GetStableDynamicID(50000, 0));
+                    }
+                    else if (saveDetailMask == "MaskAndImage")
+                    {
+                        string imageNode = g.CreateNode("WCMaskOverlay", new JObject()
+                        {
+                            ["image"] = g.FinalImageOut,
                             ["mask"] = new JArray() { segmentNode, 0 }
                         });
                         g.CreateImageSaveNode([imageNode, 0], g.GetStableDynamicID(50000, 0));

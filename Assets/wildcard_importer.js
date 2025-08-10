@@ -732,11 +732,6 @@ class WCDetailerCompletionEngine {
 // Create the new completion engine instance
 const wcDetailerEngine = new WCDetailerCompletionEngine(WCDetailerConfig);
 
-// NEW DATA-DRIVEN COMPLETION FUNCTION
-function getWCDetailerCompletionsNew(suffix, prompt) {
-  return wcDetailerEngine.getCompletions(suffix, prompt);
-}
-
 promptTabComplete.registerPrefix('wcdetailer', 'Automatically segment an area by CLIP matcher and set operations and inpaint it (optionally with a unique prompt)', (suffix, prompt) => {
   return wcDetailerEngine.getCompletions(suffix, prompt);
 });

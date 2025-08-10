@@ -954,6 +954,179 @@ class WCHullMask:
         
         return mask
 
+class WCMaskOverlay:
+    """
+    Overlays a mask on an image with 50% opacity using a high-contrast color.
+    Automatically selects a color that contrasts well with the image content.
+    """
+    
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "image": ("IMAGE",),
+                "mask": ("MASK",),
+            },
+            "optional": {
+                "color": (["auto", "fuschia", "red", "green", "blue", "yellow", "cyan", "white", "black"], {"default": "auto", "tooltip": "Color for the mask overlay. 'auto' selects high-contrast color based on image content."}),
+                "opacity": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.01, "tooltip": "Opacity of the mask overlay (0.0 = transparent, 1.0 = opaque)."}),
+            }
+        }
+
+    RETURN_TYPES = ("IMAGE",)
+    RETURN_NAMES = ("image",)
+    FUNCTION = "overlay_mask"
+    CATEGORY = "WC/masks"
+
+    def overlay_mask(self, image, mask, color="auto", opacity=0.5):
+        """
+        Overlays a mask on an image with the specified color and opacity.
+        
+        Args:
+            image: Input image tensor [B, H, W, C]
+            mask: Input mask tensor [B, H, W] or [H, W]
+            color: Color for the mask overlay
+            opacity: Opacity of the mask overlay (0.0-1.0)
+        
+        Returns:
+            Image tensor with mask overlaid
+        """
+        # Ensure image is in the right format [B, H, W, C]
+        if len(image.shape) == 3:
+            image = image.unsqueeze(0)
+        
+        batch_size, height, width, channels = image.shape
+        
+        # Ensure mask matches image dimensions
+        if len(mask.shape) == 2:
+            mask = mask.unsqueeze(0)  # Add batch dimension
+        
+        # Resize mask to match image if needed
+        if mask.shape[1] != height or mask.shape[2] != width:
+            mask = torch.nn.functional.interpolate(
+                mask.unsqueeze(1), 
+                size=(height, width), 
+                mode='bilinear', 
+                align_corners=False
+            ).squeeze(1)
+        
+        # Ensure mask batch size matches image
+        if mask.shape[0] != batch_size:
+            if mask.shape[0] == 1:
+                mask = mask.repeat(batch_size, 1, 1)
+            else:
+                mask = mask[:batch_size]
+        
+        # Clone the input image to avoid modifying the original
+        result = image.clone()
+        
+        # Select overlay color
+        if color == "auto":
+            overlay_color = self._select_high_contrast_color(image)
+        else:
+            overlay_color = self._get_color_values(color)
+        
+        # Apply mask overlay for each batch item
+        for b in range(batch_size):
+            mask_b = mask[b]  # [H, W]
+            
+            # Create color overlay where mask is active
+            mask_active = mask_b > 0  # Boolean mask for active regions
+            
+            if torch.any(mask_active):
+                # Apply color overlay with opacity blending
+                for c in range(channels):
+                    # Blend: result = (1 - alpha) * original + alpha * overlay_color
+                    # where alpha = opacity * mask_strength
+                    alpha = opacity * mask_b
+                    result[b, :, :, c] = (1 - alpha) * result[b, :, :, c] + alpha * overlay_color[c]
+        
+        return (result,)
+    
+    def _select_high_contrast_color(self, image):
+        """
+        Automatically select a high-contrast color based on image content.
+        
+        Args:
+            image: Input image tensor [B, H, W, C]
+        
+        Returns:
+            RGB color values as tensor [3] for RGB or [1] for grayscale
+        """
+        # Calculate average color across all pixels and batches
+        mean_color = torch.mean(image, dim=(0, 1, 2))  # [C]
+        
+        # Define candidate colors (RGB values 0-1)
+        candidate_colors = {
+            "fuschia": torch.tensor([1.0, 0.0, 1.0]),
+            "red": torch.tensor([1.0, 0.0, 0.0]),
+            "green": torch.tensor([0.0, 1.0, 0.0]),
+            "blue": torch.tensor([0.0, 0.0, 1.0]),
+            "yellow": torch.tensor([1.0, 1.0, 0.0]),
+            "cyan": torch.tensor([0.0, 1.0, 1.0]),
+            "white": torch.tensor([1.0, 1.0, 1.0]),
+            "black": torch.tensor([0.0, 0.0, 0.0]),
+        }
+        
+        # Handle grayscale images
+        if len(mean_color) == 1:
+            # For grayscale, choose white or black based on brightness
+            if mean_color[0] < 0.5:
+                return torch.tensor([1.0])  # White for dark images
+            else:
+                return torch.tensor([0.0])  # Black for bright images
+        
+        # For RGB images, find the color with maximum contrast
+        best_color = None
+        max_contrast = 0.0
+        
+        for color_name, color_rgb in candidate_colors.items():
+            # Ensure color tensor matches image channels
+            if len(mean_color) == 3:
+                color_values = color_rgb
+            else:
+                # Convert RGB to grayscale if needed
+                color_values = torch.tensor([0.299 * color_rgb[0] + 0.587 * color_rgb[1] + 0.114 * color_rgb[2]])
+            
+            # Calculate Euclidean distance in color space as contrast measure
+            contrast = torch.norm(mean_color - color_values).item()
+            
+            if contrast > max_contrast:
+                max_contrast = contrast
+                best_color = color_values
+        
+        # Default to fuschia if no good contrast found
+        if best_color is None:
+            if len(mean_color) == 3:
+                best_color = torch.tensor([1.0, 0.0, 1.0])
+            else:
+                best_color = torch.tensor([1.0])
+        
+        return best_color
+    
+    def _get_color_values(self, color_name):
+        """
+        Get RGB values for a named color.
+        
+        Args:
+            color_name: Name of the color
+        
+        Returns:
+            RGB color values as tensor [3]
+        """
+        color_map = {
+            "fuschia": torch.tensor([1.0, 0.0, 1.0]),
+            "red": torch.tensor([1.0, 0.0, 0.0]),
+            "green": torch.tensor([0.0, 1.0, 0.0]),
+            "blue": torch.tensor([0.0, 0.0, 1.0]),
+            "yellow": torch.tensor([1.0, 1.0, 0.0]),
+            "cyan": torch.tensor([0.0, 1.0, 1.0]),
+            "white": torch.tensor([1.0, 1.0, 1.0]),
+            "black": torch.tensor([0.0, 0.0, 0.0]),
+        }
+        
+        return color_map.get(color_name, torch.tensor([1.0, 0.0, 1.0]))  # Default to fuschia
+
 NODE_CLASS_MAPPINGS = {
     "WCCompositeMask": WCCompositeMask,
     "WCMaskBounds": WCMaskBounds,
@@ -966,4 +1139,5 @@ NODE_CLASS_MAPPINGS = {
     "WCOvalMask": WCOvalMask,
     "WCBoundingOvalMask": WCBoundingOvalMask,
     "WCHullMask": WCHullMask,
+    "WCMaskOverlay": WCMaskOverlay,
 }
