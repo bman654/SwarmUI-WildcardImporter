@@ -39,6 +39,8 @@ namespace Spoomples.Extensions.WildcardImporter
             _api.Register();
 
             AddT2IParameters();
+            
+            Detailer.Register(FilePath);
         }
 
         public void AddT2IParameters()

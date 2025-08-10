@@ -303,3 +303,437 @@ function updateDestinationFolder() {
     destinationFolder.textContent = data.folderPath;
   });
 }
+
+
+const WCDetailerCompletionTypeNone = "";
+const WCDetailerCompletionTypeParam = "0";
+const WCDetailerCompletionTypeYolo = "1";
+const WCDetailerCompletionTypeFunction = "4";
+
+class WCDetailerCompletionItem {
+  constructor(text, displayText, description, type) {
+    this.tag = type;
+    this.raw = true;
+    this.name = text;
+    this.clean = displayText;
+    this.desc = description;
+  }
+
+  startsWith() {
+    // implement this method to fake out promptTabComplete logic that expects a string
+    return true;
+  }
+}
+
+const WCDetailerConfig = {
+  parameters: {
+    blur: { 
+      type: 'int', 
+      min: 0, 
+      max: 64, 
+      default: 10, 
+      desc: 'Amount of blur to apply to the detail mask before using it. Default is 10.' 
+    },
+    creativity: { 
+      type: 'float', 
+      min: 0.0, 
+      max: 1.0, 
+      default: 0.5, 
+      desc: 'Controls how much the detailer changes the original content. Default is 0.5.' 
+    }
+  },
+  
+  functions: {
+    box: {
+      params: [
+        { name: 'x_or_mask', type: 'coord_or_mask', desc: 'The x position as a percentage of image width. Example: 0.5 for center', altDesc: 'or enter a mask specifier to create a bounding box around the given mask' },
+        { name: 'y', type: 'coord', desc: 'The y position as a percentage of image height. Example: 0.5 for center' },
+        { name: 'width', type: 'coord', desc: 'The width as a percentage of image width. Example: 0.3 for 30% width' },
+        { name: 'height', type: 'coord', desc: 'The height as a percentage of image height. Example: 0.2 for 20% height' }
+      ],
+      desc: 'Define a box-shaped mask'
+    },
+    circle: {
+      params: [
+        { name: 'x_or_mask', type: 'coord_or_mask', desc: 'The x position of circle center as a percentage of image width. Example: 0.5 for center', altDesc: 'or enter a mask specifier to create a bounding circle around the given mask' },
+        { name: 'y', type: 'coord', desc: 'The y position of circle center as a percentage of image height. Example: 0.5 for center' },
+        { name: 'radius', type: 'coord', desc: 'The radius as a percentage of smaller image dimension. Example: 0.2 for 20% radius' }
+      ],
+      desc: 'Define a circle-shaped mask'
+    },
+    oval: {
+      params: [
+        { name: 'x_or_mask', type: 'coord_or_mask', desc: 'The x position of oval center as a percentage of image width. Example: 0.5 for center', altDesc: 'or enter a mask specifier to create a bounding oval around the given mask' },
+        { name: 'y', type: 'coord', desc: 'The y position of oval center as a percentage of image height. Example: 0.5 for center' },
+        { name: 'width', type: 'coord', desc: 'The width as a percentage of smaller image dimension. Example: 0.3 for 30% width' },
+        { name: 'height', type: 'coord', desc: 'The height as a percentage of smaller image dimension. Example: 0.2 for 20% height' }
+      ],
+      desc: 'Define a oval-shaped mask'
+    },
+    hull: {
+      params: [
+        { name: 'mask', type: 'mask_only', desc: 'The hull function creates a convex hull around the given mask. Example: face, yolo-person, etc.' }
+      ],
+      desc: 'Define a hull-shaped mask'
+    }
+  },
+  
+  operators: {
+    binary: [
+      { symbol: ' | ', desc: 'Union (OR) operation', context: 'after_term' },
+      { symbol: ' & ', desc: 'Intersection (AND) operation', context: 'after_term' },
+      { symbol: ' + ', desc: 'Grow mask by pixels', context: 'after_term', helpPattern: /\+\s*(\d*)$/, helpText: 'Enter an integer value for grow pixels (0-512). Number of pixels to grow the detail mask by. Default is 16. Examples: 4, 8, 16, 32' }
+    ],
+    unary: [
+      { symbol: '!', desc: 'Invert (NOT) operation', context: 'start_or_after_operator' },
+      { symbol: '(', desc: 'Group expressions', context: 'start_or_after_operator' }
+    ],
+    postfix: [
+      { symbol: '[', desc: 'Select specific object by index', context: 'after_term', helpPattern: /\[\s*(\d*)$/, helpText: 'Enter a 1-based index number to select which detected object to use. For example: [1] selects the first object, [2] selects the second object, etc.' },
+      { symbol: ':', desc: 'Set threshold value', context: 'after_term', condition: (expr) => !expr.includes(':') }
+    ]
+  },
+  
+  contexts: [
+    { name: 'parameter_block', pattern: /^\[([^\]]*?)$/, priority: 1 },
+    { name: 'yolo_partial', pattern: /yolo-([^(\[\s|&+!)]*)$/, priority: 2 },
+    { name: 'function_call', pattern: /(box|circle|oval|hull)\(([^)]*)$/, priority: 3 },
+    { name: 'function_partial', pattern: /\b([a-z]+)$/, priority: 4 },
+    { name: 'operator_help', pattern: /(\+\s*\d*|\[\s*\d*)$/, priority: 5 },
+    { name: 'empty_expression', pattern: /^$/, priority: 6 },
+    { name: 'after_term', pattern: /[a-zA-Z0-9)\]]$/, priority: 7 },
+    { name: 'start_or_after_operator', pattern: /^$|[\s|&(]$/, priority: 8 }
+  ]
+};
+
+class WCDetailerCompletionEngine {
+  constructor(config) {
+    this.config = config;
+    this.yoloModelsCache = null;
+  }
+  
+  getYoloModels() {
+    if (!this.yoloModelsCache) {
+      this.yoloModelsCache = rawGenParamTypesFromServer.find(p => p.id == 'yolomodelinternal')?.values || [];
+    }
+    return this.yoloModelsCache;
+  }
+  
+  createCompletion(completionText, displayText, description, type, prompt) {
+    const index = promptTabComplete.findLastWordIndex(prompt);
+    return new WCDetailerCompletionItem(`${prompt.substring(index)}${completionText}`, displayText, description, type);
+  }
+  
+  matchesPrefix(text, prefix) {
+    return text.toLowerCase().startsWith(prefix.toLowerCase());
+  }
+  
+  parseCurrentState(suffix) {
+    const state = {
+      original: suffix,
+      paramBlock: '',
+      maskExpression: suffix
+    };
+    
+    // Parse parameter block if present
+    const paramMatch = suffix.match(/^(\[[^\]]*\])(.*)/);
+    if (paramMatch) {
+      state.paramBlock = paramMatch[1];
+      state.maskExpression = paramMatch[2];
+    }
+    
+    return state;
+  }
+  
+  detectContext(state) {
+    const expr = state.maskExpression;
+    
+    // Check parameter block context first
+    if (state.original.startsWith('[') && !state.original.includes(']')) {
+      return 'parameter_block';
+    }
+    
+    // Check other contexts in priority order
+    for (const context of this.config.contexts) {
+      if (context.pattern.test(expr)) {
+        return context.name;
+      }
+    }
+    
+    return 'default';
+  }
+  
+  handleParameterBlock(state, prompt) {
+    const paramContent = state.original.substring(1);
+    const completions = [];
+    
+    if (paramContent === '') {
+      // Suggest initial parameters
+      for (const [name, param] of Object.entries(this.config.parameters)) {
+        completions.push(this.createCompletion(`[${name}:`, `[${name}:`, `Override ${name} setting for this detailer`, WCDetailerCompletionTypeParam, prompt));
+      }
+    } else {
+      const lastCommaIndex = paramContent.lastIndexOf(',');
+      const currentParam = lastCommaIndex >= 0 ? paramContent.substring(lastCommaIndex + 1).trim() : paramContent;
+      
+      if (!currentParam.includes(':')) {
+        // Suggest parameter names
+        for (const [name, param] of Object.entries(this.config.parameters)) {
+          if (this.matchesPrefix(`${name}:`, currentParam)) {
+            completions.push(this.createCompletion(`${name}:`, `${name}:`, `Override ${name} setting for this detailer`, WCDetailerCompletionTypeParam, prompt));
+          }
+        }
+      } else {
+        const [paramName, paramValue] = currentParam.split(':', 2);
+        const trimmedParamName = paramName.trim().toLowerCase();
+        const trimmedParamValue = paramValue.trim();
+        const paramConfig = this.config.parameters[trimmedParamName];
+        
+        if (paramConfig && trimmedParamValue === '') {
+          return [`\nEnter a ${paramConfig.type === 'int' ? 'integer' : 'decimal'} value for ${trimmedParamName} (${paramConfig.min}-${paramConfig.max}). ${paramConfig.desc}`];
+        } else if (paramConfig && this.isValidParamValue(trimmedParamValue, paramConfig)) {
+          // Suggest next actions
+          const hasParams = Object.keys(this.config.parameters).reduce((acc, name) => {
+            acc[name] = paramContent.includes(`${name}:`);
+            return acc;
+          }, {});
+          
+          for (const [name, param] of Object.entries(this.config.parameters)) {
+            if (!hasParams[name] && trimmedParamName !== name) {
+              completions.push(this.createCompletion(`,${name}:`, `,${name}:`, `Add ${name} parameter`, WCDetailerCompletionTypeParam, prompt));
+            }
+          }
+          completions.push(this.createCompletion(']', ']', 'Close parameter block', WCDetailerCompletionTypeParam, prompt));
+        }
+      }
+    }
+    
+    return completions;
+  }
+  
+  isValidParamValue(value, paramConfig) {
+    if (paramConfig.type === 'int') {
+      const intValue = parseInt(value);
+      return !isNaN(intValue) && intValue >= paramConfig.min && intValue <= paramConfig.max;
+    } else if (paramConfig.type === 'float') {
+      const floatValue = parseFloat(value);
+      return !isNaN(floatValue) && floatValue >= paramConfig.min && floatValue <= paramConfig.max;
+    }
+    return false;
+  }
+  
+  handleYoloCompletion(state, prompt) {
+    const match = state.maskExpression.match(/yolo-([^(\[\s|&+!)]*)$/);
+    if (!match) return [];
+    
+    const partialModel = match[1];
+    const yoloModels = this.getYoloModels();
+    const completions = [];
+    
+    // Check for exact match first
+    const exactModel = yoloModels.find(m => m === partialModel);
+    if (exactModel) {
+      completions.push(this.createCompletion('(', '(', 'Add class filter', WCDetailerCompletionTypeNone, prompt));
+      completions.push(this.createCompletion('[', '[', 'Add index selector', WCDetailerCompletionTypeNone, prompt));
+      completions.push(this.createCompletion(' + ', ' + ', 'Grow mask by pixels', WCDetailerCompletionTypeNone, prompt));
+    } else {
+      // No exact match, suggest partial completions
+      yoloModels.forEach(model => {
+        if (this.matchesPrefix(model, partialModel)) {
+          const remaining = model.substring(partialModel.length);
+          if (remaining.length > 0) {
+            completions.push(this.createCompletion(remaining, remaining, `YOLOv8 model: ${model}`, WCDetailerCompletionTypeYolo, prompt));
+          }
+        }
+      });
+    }
+    
+    return completions;
+  }
+  
+  handleFunctionCall(state, prompt) {
+    const match = state.maskExpression.match(/(box|circle|oval|hull)\(([^)]*)$/);
+    if (!match) return [];
+    
+    const functionName = match[1];
+    const paramContent = match[2];
+    const params = paramContent.split(',');
+    const currentParamIndex = params.length - 1;
+    const currentParam = params[currentParamIndex].trim();
+    const functionConfig = this.config.functions[functionName];
+    
+    if (!functionConfig) return [];
+    
+    // If we just opened parentheses or are at a comma, show parameter help
+    if (paramContent === '' || paramContent.endsWith(',') || currentParam === '') {
+      const paramConfig = functionConfig.params[currentParamIndex];
+      if (!paramConfig) return [];
+      
+      const helpText = [`\nEnter ${paramConfig.desc}`];
+      
+      if (paramConfig.type === 'coord_or_mask' || paramConfig.type === 'mask_only') {
+        if (paramConfig.altDesc) {
+          helpText.push(`\n${paramConfig.altDesc}`);
+        }
+        return [...helpText, ...this.getMaskSpecifierCompletions(prompt)];
+      }
+      
+      return helpText;
+    }
+    
+    return [];
+  }
+  
+  handleFunctionPartial(state, prompt) {
+    const match = state.maskExpression.match(/\b([a-z]+)$/);
+    if (!match) return [];
+    
+    const partialFunction = match[1];
+    const completions = [];
+    
+    // Add matching function completions
+    for (const [funcName, funcConfig] of Object.entries(this.config.functions)) {
+      if (this.matchesPrefix(funcName, partialFunction)) {
+        const remaining = funcName.substring(partialFunction.length) + '(';
+        completions.push(this.createCompletion(remaining, remaining, funcConfig.desc, WCDetailerCompletionTypeFunction, prompt));
+      }
+    }
+    
+    // Always add operators for partial terms (matching original behavior)
+    const operatorCompletions = this.handleAfterTerm(state, prompt);
+    completions.push(...operatorCompletions);
+    
+    return completions;
+  }
+  
+  handleYoloPartial(state, prompt) {
+    const match = state.maskExpression.match(/yolo-([^(\[\s|&+!)]*)$/);
+    if (!match) return [];
+    
+    const partialModel = match[1];
+    const completions = [];
+    const yoloModels = this.getYoloModels();
+    
+    for (const model of yoloModels) {
+      if (this.matchesPrefix(model, partialModel)) {
+        const remaining = model.substring(partialModel.length);
+        completions.push(this.createCompletion(remaining, remaining, `YOLOv8 model: ${model}`, WCDetailerCompletionTypeYolo, prompt));
+      }
+    }
+    
+    return completions;
+  }
+  
+  handleOperatorHelp(state, prompt) {
+    const expr = state.maskExpression;
+    
+    // Check for operator help patterns
+    for (const operator of this.config.operators.binary) {
+      if (operator.helpPattern && operator.helpPattern.test(expr)) {
+        return [operator.helpText];
+      }
+    }
+    
+    for (const operator of this.config.operators.postfix) {
+      if (operator.helpPattern && operator.helpPattern.test(expr)) {
+        return [operator.helpText];
+      }
+    }
+    
+    return [];
+  }
+  
+  handleEmptyExpression(state, prompt) {
+    const completions = [];
+    
+    // Add parameter block if not already present
+    if (!state.paramBlock) {
+      for (const [name, param] of Object.entries(this.config.parameters)) {
+        completions.push(this.createCompletion(`[${name}:`, `[${name}:`, `Override ${name} setting for this detailer`, WCDetailerCompletionTypeParam, prompt));
+      }
+    }
+    
+    // Add mask specifier completions
+    completions.push(...this.getMaskSpecifierCompletions(prompt));
+    
+    return completions;
+  }
+  
+  handleAfterTerm(state, prompt) {
+    const completions = [];
+    
+    // Add binary operators
+    for (const operator of this.config.operators.binary) {
+      completions.push(this.createCompletion(operator.symbol, operator.symbol, operator.desc, WCDetailerCompletionTypeNone, prompt));
+    }
+    
+    // Add postfix operators
+    for (const operator of this.config.operators.postfix) {
+      if (!operator.condition || operator.condition(state.maskExpression)) {
+        completions.push(this.createCompletion(operator.symbol, operator.symbol, operator.desc, WCDetailerCompletionTypeNone, prompt));
+      }
+    }
+    
+    return completions;
+  }
+  
+  handleStartOrAfterOperator(state, prompt) {
+    return this.getMaskSpecifierCompletions(prompt);
+  }
+  
+  getMaskSpecifierCompletions(prompt) {
+    const completions = [];
+    
+    // Add unary operators
+    for (const operator of this.config.operators.unary) {
+      completions.push(this.createCompletion(operator.symbol, operator.symbol, operator.desc, WCDetailerCompletionTypeNone, prompt));
+    }
+    
+    // Add functions
+    for (const [funcName, funcConfig] of Object.entries(this.config.functions)) {
+      completions.push(this.createCompletion(`${funcName}(`, `${funcName}(`, funcConfig.desc, WCDetailerCompletionTypeFunction, prompt));
+    }
+    
+    // Add YOLO models
+    const yoloModels = this.getYoloModels();
+    yoloModels.forEach(model => {
+      completions.push(this.createCompletion(`yolo-${model}`, `yolo-${model}`, `YOLOv8 model`, WCDetailerCompletionTypeYolo, prompt));
+    });
+    
+    return completions;
+  }
+  
+  getCompletions(suffix, prompt) {
+    const state = this.parseCurrentState(suffix.trim());
+    const context = this.detectContext(state);
+    
+    // Call appropriate handler
+    const handlerName = `handle${context.charAt(0).toUpperCase() + context.slice(1).replace(/_([a-z])/g, (_, letter) => letter.toUpperCase())}`;
+    
+    if (typeof this[handlerName] === 'function') {
+      const result = this[handlerName](state, prompt);
+      if (result && result.length > 0) {
+        return result;
+      }
+    }
+    
+    // Default help text
+    return [
+      '\nSpecify before the ">" some text to match against in the image, like "<wcdetailer:face | hair>".',
+      '\nCan also do "<wcdetailer:[blur:10,creativity:0.5]face | hair>".',
+      '\nCan use operators: | (union), & (intersect), + (grow), ! (invert)',
+      '\nCan use functions: box(), circle(), hull(), oval()',
+      '\nCan use YOLO models with "yolo-" prefix',
+      '\nSee https://github.com/bman654/SwarmUI-WildcardImporter/blob/main/wcdetailer.md for more details.'
+    ];
+  }
+}
+
+// Create the new completion engine instance
+const wcDetailerEngine = new WCDetailerCompletionEngine(WCDetailerConfig);
+
+promptTabComplete.registerPrefix('wcdetailer', 'Automatically segment an area by CLIP matcher and set operations and inpaint it (optionally with a unique prompt)', (suffix, prompt) => {
+  return wcDetailerEngine.getCompletions(suffix, prompt);
+});
+
+// End of WCDetailer completion system
