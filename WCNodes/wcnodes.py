@@ -1035,10 +1035,11 @@ class WCMaskOverlay:
             
             if torch.any(mask_active):
                 # Apply color overlay with opacity blending
+                # Blend: result = (1 - alpha) * original + alpha * overlay_color
+                # where alpha = opacity * mask_strength
+                alpha = mask_b.clone()
+                alpha[mask_active] = mask_b[mask_active] * (1 - opacity) + opacity
                 for c in range(channels):
-                    # Blend: result = (1 - alpha) * original + alpha * overlay_color
-                    # where alpha = opacity * mask_strength
-                    alpha = opacity * mask_b
                     result[b, :, :, c] = (1 - alpha) * result[b, :, :, c] + alpha * overlay_color[c]
         
         return (result,)
