@@ -204,7 +204,11 @@ namespace Spoomples.Extensions.WildcardImporter
             var task = _tasks[taskId];
             
             // Handle Dictionary<string, object>
-            if (currentValue is Dictionary<string, object> stringKeyMap)
+            if (currentValue == null)
+            {
+                task.AddWarning($"Empty yaml object at path: {currentPath}");
+            }
+            else if (currentValue is Dictionary<string, object> stringKeyMap)
             {
                 foreach (var kvp in stringKeyMap)
                 {
@@ -1007,7 +1011,9 @@ namespace Spoomples.Extensions.WildcardImporter
     /// <summary>Represents file data sent from the frontend. Can be a file path or a base64 encoded file. This is represented as a file path if the Base64Content is null, and as a base64 encoded file otherwise.</summary>
     public class FileData
     {
+        #pragma warning disable CS8632 // Nullable reference annotations used without nullable context
         public string FilePath;
         public string? Base64Content;
+        #pragma warning restore CS8632 // Nullable reference annotations used without nullable context
     }
 }
