@@ -90,6 +90,10 @@ namespace Spoomples.Extensions.WildcardImporter
             AssertTransform("{summer} is coming", 
                            "summer is coming",
                            "Single option variant");
+            
+            AssertTransform("{2000|2010|2020} is coming",
+                "<random:2000|2010|2020> is coming",
+                "Variants with numeric options");
 
             // Multiple variants in one line
             AssertTransform("I like {red|blue} and {cats|dogs}", 
@@ -271,11 +275,43 @@ namespace Spoomples.Extensions.WildcardImporter
             AssertTransform("${color=red} The ${color} car", 
                            "<setmacro[color,false]:red> The <macro:color> car",
                            "Deferred variable assignment");
+            
+            AssertTransform("${color=!red}  The ${color} car",
+                "<setvar[color,false]:red><setmacro[color,false]:<var:color>>  The <macro:color> car",
+                "Immediate variable assignment");
+            
+            AssertTransform("${season=!__season__}${year={2000|2010|2020}} The ${season} of ${year}",
+                "<setvar[season,false]:<wildcard:season>><setmacro[season,false]:<var:season>><setmacro[year,false]:<random:2000|2010|2020>> The <macro:season> of <macro:year>",
+                "Complex assignments");
 
             // Multiple assignments
             AssertTransform("${a=1}${b=2} Values: ${a}, ${b}", 
                            "<setmacro[a,false]:1><setmacro[b,false]:2> Values: <macro:a>, <macro:b>",
                            "Multiple variable assignments");
+
+            AssertTransform("${color=red} car", 
+                           "<setmacro[color,false]:red> car",
+                           "Variable with simple value");
+            
+            AssertTransform("${color={red|blue}} car", 
+                           "<setmacro[color,false]:<random:red|blue>> car",
+                           "Variable with variant value");
+            
+            AssertTransform("${color=__colors__} car", 
+                           "<setmacro[color,false]:<wildcard:colors>> car",
+                           "Variable with wildcard value");
+            
+            AssertTransform("${colors={2$$red|blue|green}} palette", 
+                           "<setmacro[colors,false]:<random[2,]:red|blue|green>> palette",
+                           "Variable with quantified variant");
+            
+            AssertTransform("${color={2::red|blue}} car", 
+                           "<setmacro[color,false]:<random:red|red|blue>> car",
+                           "Variable with weighted variant");
+            
+            AssertTransform("${color=!{red|blue}} car", 
+                           "<setvar[color,false]:<random:red|blue>><setmacro[color,false]:<var:color>> car",
+                           "Immediate variable with variant");
         }
 
         private static void TestVariableAccess()
