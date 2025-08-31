@@ -48,6 +48,9 @@ namespace Spoomples.Extensions.WildcardImporter
             TestVariableAccess();
             TestImmediateVariables();
 
+            // Test prompt editing
+            TestPromptEditing();
+
             // Test negative attention
             TestNegativeAttention();
 
@@ -296,6 +299,117 @@ namespace Spoomples.Extensions.WildcardImporter
             AssertTransform("${choice=!{red|blue}} Color is ${choice}", 
                            "<setvar[choice,false]:<random:red|blue>><setmacro[choice,false]:<var:choice>> Color is <macro:choice>",
                            "Immediate variable with variant");
+        }
+
+        #endregion
+
+        #region Test Prompt Editing
+
+        private static void TestPromptEditing()
+        {
+            // Basic prompt editing: [from:to:step]
+            AssertTransform("[girl:boy:5] walking", 
+                           "<fromto[5]:girl||boy> walking",
+                           "Basic prompt editing");
+
+            // Prompt editing with decimal step
+            AssertTransform("[happy:sad:0.5] face", 
+                           "<fromto[0.5]:happy||sad> face",
+                           "Prompt editing with decimal step");
+
+            // Missing from value: [:to:step]
+            AssertTransform("[:boy:3] character", 
+                           "<fromto[3]:<comment:empty>||boy> character",
+                           "Prompt editing missing from value");
+
+            // Special to-only syntax: [to:step]
+            AssertTransform("[:boy:3] character", 
+                "<fromto[3]:<comment:empty>||boy> character",
+                "Special to-only syntax");
+
+            // Missing to value: [from::step]
+            AssertTransform("[girl::7] character", 
+                           "<fromto[7]:girl||<comment:empty>> character",
+                           "Prompt editing missing to value");
+
+            // Missing both from and to: [::step]
+            AssertTransform("[::2] something", 
+                           "<fromto[2]:<comment:empty>||<comment:empty>> something",
+                           "Prompt editing missing from and to values");
+
+            // Multiple prompt editing in one line
+            AssertTransform("[girl:boy:5] and [happy:sad:3] person", 
+                           "<fromto[5]:girl||boy> and <fromto[3]:happy||sad> person",
+                           "Multiple prompt editing");
+
+            // Prompt editing with variants in from/to
+            AssertTransform("[{red|blue}:green:0.4] car", 
+                           "<fromto[0.4]:<random:red|blue>||green> car",
+                           "Prompt editing with variant in from");
+
+            AssertTransform("[red:{blue|green}:2] car", 
+                           "<fromto[2]:red||<random:blue|green>> car",
+                           "Prompt editing with variant in to");
+
+            // Prompt editing with wildcards in from/to
+            AssertTransform("[__colors__:green:6] background", 
+                           "<fromto[6]:<wildcard:colors>||green> background",
+                           "Prompt editing with wildcard in from");
+
+            AssertTransform("[red:__colors__:8] background", 
+                           "<fromto[8]:red||<wildcard:colors>> background",
+                           "Prompt editing with wildcard in to");
+
+            // Prompt editing with complex nested content
+            AssertTransform("[{red|__colors__}:{blue|green}:1.5] complex", 
+                           "<fromto[1.5]:<random:red|<wildcard:colors>>||<random:blue|green>> complex",
+                           "Prompt editing with complex nested content");
+
+            // Prompt editing with variables
+            AssertTransform("[${color}:blue:4] car", 
+                           "<fromto[4]:<macro:color>||blue> car",
+                           "Prompt editing with variable in from");
+
+            // Prompt editing should be processed BEFORE negative attention
+            // This ensures [text:other:5] is treated as prompt editing, not negative attention
+            AssertTransform("[girl:boy:5] but not [negative] attention", 
+                           "<fromto[5]:girl||boy> but not (negative:0.9) attention",
+                           "Prompt editing processed before negative attention");
+
+            // Edge case: malformed prompt editing (only one colon) should be treated as negative attention
+            AssertTransform("[girl:boy] should be negative", 
+                           "(girl:boy:0.9) should be negative",
+                           "Malformed prompt editing treated as negative attention");
+
+            // Edge case: no colons should be treated as negative attention
+            AssertTransform("[just text] should be negative", 
+                           "(just text:0.9) should be negative",
+                           "No colons treated as negative attention");
+
+            // Edge case: empty step should not be treated as prompt editing
+            AssertTransform("[girl:boy:] should be negative", 
+                           "(girl:boy::0.9) should be negative",
+                           "Empty step treated as negative attention");
+
+            // Edge case: non-numeric step should not be treated as prompt editing
+            AssertTransform("[girl:boy:abc] should be negative", 
+                           "(girl:boy:abc:0.9) should be negative",
+                           "Non-numeric step treated as negative attention");
+
+            // Nested variants in from/to values (more realistic scenario)
+            AssertTransform("[{red|blue}:target:3] test", 
+                           "<fromto[3]:<random:red|blue>||target> test",
+                           "Prompt editing with nested variant in from value");
+
+            // Complex but realistic nesting with wildcards and variants
+            AssertTransform("[{__colors__|red}:{blue|__shades__}:2.5] background", 
+                           "<fromto[2.5]:<random:<wildcard:colors>|red>||<random:blue|<wildcard:shades>>> background",
+                           "Prompt editing with complex realistic nesting");
+
+            // Escaped colons should not split prompt editing
+            AssertTransform("[text\\:with\\:colons:target:5] test", 
+                           "<fromto[5]:text\\:with\\:colons||target> test",
+                           "Prompt editing with escaped colons");
         }
 
         #endregion

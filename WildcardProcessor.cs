@@ -340,6 +340,10 @@ namespace Spoomples.Extensions.WildcardImporter
             
             line = ProcessVariables(line, _tasks[taskId]);
             
+            // Process prompt editing BEFORE negative attention to avoid conflicts
+            // [from:to:step] -> <fromto[step]:from||to>
+            line = ProcessPromptEditing(line, _tasks[taskId]);
+            
             // Process negative attention specifiers: [text] -> (text:0.9)
             line = ProcessNegativeAttention(line);
 
@@ -430,6 +434,146 @@ namespace Spoomples.Extensions.WildcardImporter
             }
             
             return result.ToString();
+        }
+
+        private string ProcessPromptEditing(string input, ProcessingTask task)
+        {
+            var result = new StringBuilder(input);
+            var startIndex = 0;
+            
+            while (true)
+            {
+                // Find the next bracket that could be prompt editing
+                var bracketStartIndex = result.ToString().IndexOf("[", startIndex, StringComparison.Ordinal);
+                if (bracketStartIndex == -1)
+                    break;
+                
+                // Check if this bracket is escaped
+                if (bracketStartIndex > 0 && result[bracketStartIndex - 1] == '\\')
+                {
+                    startIndex = bracketStartIndex + 1;
+                    continue;
+                }
+                
+                // Check if this bracket is part of SwarmUI syntax (inside < >)
+                if (IsInsideSwarmUITag(result.ToString(), bracketStartIndex))
+                {
+                    startIndex = bracketStartIndex + 1;
+                    continue;
+                }
+                
+                // Find the matching closing bracket
+                int closeBracketIndex = FindMatchingClosingSquareBracket(result.ToString(), bracketStartIndex);
+                
+                if (closeBracketIndex == -1)
+                {
+                    // No matching closing bracket found, move past this opening and continue
+                    startIndex = bracketStartIndex + 1;
+                    continue;
+                }
+                
+                // Extract the content inside the brackets (without the [])
+                string content = result.ToString().Substring(bracketStartIndex + 1, closeBracketIndex - bracketStartIndex - 1);
+                
+                // Check if this is prompt editing syntax: [from:to:step]
+                if (IsPromptEditingSyntax(content))
+                {
+                    // Process as prompt editing
+                    string replacement = ProcessPromptEditingContent(content, task);
+                    
+                    // Replace the entire prompt editing expression with the new format
+                    result.Remove(bracketStartIndex, closeBracketIndex - bracketStartIndex + 1);
+                    result.Insert(bracketStartIndex, replacement);
+                    
+                    // Update the start index for the next search
+                    startIndex = bracketStartIndex + replacement.Length;
+                }
+                else
+                {
+                    // Not prompt editing, skip this bracket
+                    startIndex = bracketStartIndex + 1;
+                }
+            }
+            
+            return result.ToString();
+        }
+        
+        /// <summary>
+        /// Checks if the content inside brackets matches prompt editing syntax: from:to:step
+        /// where step must be a valid number.
+        /// </summary>
+        /// <param name="content">The content inside the brackets.</param>
+        /// <returns>True if it's prompt editing syntax, false otherwise.</returns>
+        private bool IsPromptEditingSyntax(string content)
+        {
+            // Find colons at the top level (not inside nested structures)
+            char[] openChars = { '{', '[', '<' };
+            char[] closeChars = { '}', ']', '>' };
+            
+            var colonIndices = new List<int>();
+            int searchStart = 0;
+            
+            while (true)
+            {
+                int colonIndex = FindTopLevelChar(content, searchStart, ':', openChars, closeChars);
+                if (colonIndex == -1)
+                    break;
+                    
+                colonIndices.Add(colonIndex);
+                searchStart = colonIndex + 1;
+            }
+            
+            // Must have exactly 2 colons for prompt editing syntax
+            if (colonIndices.Count != 2)
+                return false;
+            
+            // Extract the step part (after the second colon)
+            string stepPart = content.Substring(colonIndices[1] + 1);
+            
+            // Step must be a valid number (integer or decimal)
+            if (string.IsNullOrWhiteSpace(stepPart))
+                return false;
+                
+            return double.TryParse(stepPart.Trim(), out _);
+        }
+        
+        /// <summary>
+        /// Processes prompt editing content and converts it to SwarmUI syntax.
+        /// </summary>
+        /// <param name="content">The content inside the brackets: from:to:step</param>
+        /// <param name="task">The processing task for context.</param>
+        /// <returns>The converted SwarmUI syntax: &lt;fromto[step]:from||to&gt;</returns>
+        private string ProcessPromptEditingContent(string content, ProcessingTask task)
+        {
+            // Find colons at the top level
+            char[] openChars = { '{', '[', '<' };
+            char[] closeChars = { '}', ']', '>' };
+            
+            var colonIndices = new List<int>();
+            int searchStart = 0;
+            
+            while (true)
+            {
+                int colonIndex = FindTopLevelChar(content, searchStart, ':', openChars, closeChars);
+                if (colonIndex == -1)
+                    break;
+                    
+                colonIndices.Add(colonIndex);
+                searchStart = colonIndex + 1;
+            }
+            
+            // Extract the three parts
+            string fromPart = content.Substring(0, colonIndices[0]);
+            string toPart = content.Substring(colonIndices[0] + 1, colonIndices[1] - colonIndices[0] - 1);
+            string stepPart = content.Substring(colonIndices[1] + 1);
+            
+            // Process each part (they might contain variants, wildcards, etc.)
+            // But we need to be careful not to process them recursively here since they'll be processed later
+            string processedFrom = string.IsNullOrEmpty(fromPart.Trim()) ? "<comment:empty>" : fromPart;
+            string processedTo = string.IsNullOrEmpty(toPart.Trim()) ? "<comment:empty>" : toPart;
+            string processedStep = stepPart.Trim();
+            
+            return $"<fromto[{processedStep}]:{processedFrom}||{processedTo}>";
         }
 
         private string ProcessNegativeAttention(string input)
@@ -545,25 +689,83 @@ namespace Spoomples.Extensions.WildcardImporter
         /// <returns>The index of the matching closing square bracket, or -1 if not found.</returns>
         private int FindMatchingClosingSquareBracket(string input, int openBracketIndex)
         {
+            return FindMatchingClosingBracket(input, openBracketIndex, '[', ']');
+        }
+        
+        /// <summary>
+        /// Generic method to find matching closing bracket/brace for any bracket type.
+        /// Handles nested brackets properly by counting bracket depth and respects escaped characters.
+        /// </summary>
+        /// <param name="input">The input string.</param>
+        /// <param name="openIndex">The index of the opening bracket.</param>
+        /// <param name="openChar">The opening bracket character.</param>
+        /// <param name="closeChar">The closing bracket character.</param>
+        /// <returns>The index of the matching closing bracket, or -1 if not found.</returns>
+        private int FindMatchingClosingBracket(string input, int openIndex, char openChar, char closeChar)
+        {
             int bracketLevel = 1;
             
-            for (int i = openBracketIndex + 1; i < input.Length; i++)
+            for (int i = openIndex + 1; i < input.Length; i++)
             {
                 // Check if this bracket is escaped
                 if (i > 0 && input[i - 1] == '\\')
                     continue;
                     
-                if (input[i] == '[')
+                if (input[i] == openChar)
                 {
                     bracketLevel++;
                 }
-                else if (input[i] == ']')
+                else if (input[i] == closeChar)
                 {
                     bracketLevel--;
                     if (bracketLevel == 0)
                     {
                         return i;
                     }
+                }
+            }
+            
+            return -1;
+        }
+        
+        /// <summary>
+        /// Finds the index of the next unescaped character at the top nesting level.
+        /// </summary>
+        /// <param name="input">The input string.</param>
+        /// <param name="startIndex">The index to start searching from.</param>
+        /// <param name="targetChar">The character to find.</param>
+        /// <param name="openChars">Array of opening bracket characters to track nesting.</param>
+        /// <param name="closeChars">Array of closing bracket characters to track nesting.</param>
+        /// <returns>The index of the target character at top level, or -1 if not found.</returns>
+        private int FindTopLevelChar(string input, int startIndex, char targetChar, char[] openChars, char[] closeChars)
+        {
+            int[] nestingLevels = new int[openChars.Length];
+            
+            for (int i = startIndex; i < input.Length; i++)
+            {
+                // Check if this character is escaped
+                if (i > 0 && input[i - 1] == '\\')
+                    continue;
+                
+                char c = input[i];
+                
+                // Update nesting levels
+                for (int j = 0; j < openChars.Length; j++)
+                {
+                    if (c == openChars[j])
+                    {
+                        nestingLevels[j]++;
+                    }
+                    else if (c == closeChars[j])
+                    {
+                        nestingLevels[j]--;
+                    }
+                }
+                
+                // Check if we found the target character at top level
+                if (c == targetChar && nestingLevels.All(level => level == 0))
+                {
+                    return i;
                 }
             }
             
@@ -628,23 +830,7 @@ namespace Spoomples.Extensions.WildcardImporter
         /// <returns>The index of the matching closing brace, or -1 if not found.</returns>
         private int FindMatchingClosingBrace(string input, int openBraceIndex)
         {
-            int braceLevel = 1;
-            
-            for (int i = openBraceIndex + 1; i < input.Length; i++)
-            {
-                if (input[i] == '{')
-                    braceLevel++;
-                else if (input[i] == '}')
-                {
-                    braceLevel--;
-                    if (braceLevel == 0)
-                    {
-                        return i;
-                    }
-                }
-            }
-            
-            return -1;
+            return FindMatchingClosingBracket(input, openBraceIndex, '{', '}');
         }
 
         /// <summary>
