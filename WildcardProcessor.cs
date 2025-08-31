@@ -339,6 +339,9 @@ namespace Spoomples.Extensions.WildcardImporter
             });
             
             line = ProcessVariables(line, _tasks[taskId]);
+            
+            // Process negative attention specifiers: [text] -> (text:0.9)
+            line = ProcessNegativeAttention(line);
 
             // See https://github.com/adieyal/sd-dynamic-prompts/blob/main/docs/SYNTAX.md#variants
             // Replace {} variants.
@@ -427,6 +430,144 @@ namespace Spoomples.Extensions.WildcardImporter
             }
             
             return result.ToString();
+        }
+
+        private string ProcessNegativeAttention(string input)
+        {
+            // Use a recursive approach to handle nested brackets properly
+            return ProcessNegativeAttentionRecursive(input);
+        }
+        
+        private string ProcessNegativeAttentionRecursive(string input)
+        {
+            var result = new StringBuilder(input);
+            var startIndex = 0;
+            
+            while (true)
+            {
+                // Find the next negative attention pattern
+                var bracketStartIndex = result.ToString().IndexOf("[", startIndex, StringComparison.Ordinal);
+                if (bracketStartIndex == -1)
+                    break;
+                
+                // Check if this bracket is escaped
+                if (bracketStartIndex > 0 && result[bracketStartIndex - 1] == '\\')
+                {
+                    startIndex = bracketStartIndex + 1;
+                    continue;
+                }
+                
+                // Check if this bracket is part of SwarmUI syntax (inside < >)
+                if (IsInsideSwarmUITag(result.ToString(), bracketStartIndex))
+                {
+                    startIndex = bracketStartIndex + 1;
+                    continue;
+                }
+                
+                // Find the matching closing bracket for this level
+                int closeBracketIndex = FindMatchingClosingSquareBracket(result.ToString(), bracketStartIndex);
+                
+                if (closeBracketIndex == -1)
+                {
+                    // No matching closing bracket found, move past this opening and continue
+                    startIndex = bracketStartIndex + 1;
+                    continue;
+                }
+                
+                // Extract the content inside the brackets (without the [])
+                string content = result.ToString().Substring(bracketStartIndex + 1, closeBracketIndex - bracketStartIndex - 1);
+                
+                // Recursively process the content first to handle nested brackets
+                string processedContent = ProcessNegativeAttentionRecursive(content);
+                
+                // Calculate the weight - if already processed, compound it
+                double weight = 0.9;
+                string finalContent = processedContent;
+                
+                // Check if the processed content is already an attention specifier
+                var attentionMatch = System.Text.RegularExpressions.Regex.Match(processedContent, @"^\((.+?):([0-9.]+)\)$");
+                if (attentionMatch.Success)
+                {
+                    finalContent = attentionMatch.Groups[1].Value;
+                    if (double.TryParse(attentionMatch.Groups[2].Value, out double existingWeight))
+                    {
+                        weight = existingWeight * 0.9; // Compound the weight
+                    }
+                }
+                
+                // Transform to ComfyUI positive attention format
+                string replacement = $"({finalContent}:{weight:0.###})";
+                
+                // Replace the entire negative attention expression with the new format
+                result.Remove(bracketStartIndex, closeBracketIndex - bracketStartIndex + 1);
+                result.Insert(bracketStartIndex, replacement);
+                
+                // Update the start index for the next search
+                startIndex = bracketStartIndex + replacement.Length;
+            }
+            
+            return result.ToString();
+        }
+
+        /// <summary>
+        /// Checks if a bracket at the given index is inside a SwarmUI tag (between < and >).
+        /// </summary>
+        /// <param name="input">The input string.</param>
+        /// <param name="bracketIndex">The index of the bracket to check.</param>
+        /// <returns>True if the bracket is inside a SwarmUI tag, false otherwise.</returns>
+        private bool IsInsideSwarmUITag(string input, int bracketIndex)
+        {
+            // Track nesting level of angle brackets to properly handle nested SwarmUI tags
+            int angleDepth = 0;
+            
+            for (int i = 0; i < bracketIndex; i++)
+            {
+                if (input[i] == '<')
+                {
+                    angleDepth++;
+                }
+                else if (input[i] == '>')
+                {
+                    angleDepth--;
+                }
+            }
+            
+            // If angleDepth > 0, we're inside SwarmUI tags
+            return angleDepth > 0;
+        }
+
+        /// <summary>
+        /// Finds the matching closing square bracket for an opening bracket at the specified index.
+        /// Handles nested square brackets properly by counting bracket depth.
+        /// </summary>
+        /// <param name="input">The input string.</param>
+        /// <param name="openBracketIndex">The index of the opening square bracket.</param>
+        /// <returns>The index of the matching closing square bracket, or -1 if not found.</returns>
+        private int FindMatchingClosingSquareBracket(string input, int openBracketIndex)
+        {
+            int bracketLevel = 1;
+            
+            for (int i = openBracketIndex + 1; i < input.Length; i++)
+            {
+                // Check if this bracket is escaped
+                if (i > 0 && input[i - 1] == '\\')
+                    continue;
+                    
+                if (input[i] == '[')
+                {
+                    bracketLevel++;
+                }
+                else if (input[i] == ']')
+                {
+                    bracketLevel--;
+                    if (bracketLevel == 0)
+                    {
+                        return i;
+                    }
+                }
+            }
+            
+            return -1;
         }
 
         private string ProcessVariants(string input, ProcessingTask task)

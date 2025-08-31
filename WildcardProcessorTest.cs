@@ -48,6 +48,9 @@ namespace Spoomples.Extensions.WildcardImporter
             TestVariableAccess();
             TestImmediateVariables();
 
+            // Test negative attention
+            TestNegativeAttention();
+
             // Test edge cases
             TestMalformedSyntax();
             TestComplexNesting();
@@ -293,6 +296,82 @@ namespace Spoomples.Extensions.WildcardImporter
             AssertTransform("${choice=!{red|blue}} Color is ${choice}", 
                            "<setvar[choice,false]:<random:red|blue>><setmacro[choice,false]:<var:choice>> Color is <macro:choice>",
                            "Immediate variable with variant");
+        }
+
+        #endregion
+
+        #region Test Negative Attention
+
+        private static void TestNegativeAttention()
+        {
+            // Basic negative attention: [text]
+            AssertTransform("A beautiful [ugly] woman", 
+                           "A beautiful (ugly:0.9) woman",
+                           "Basic negative attention");
+
+            // Multiple negative attention blocks
+            AssertTransform("[bad] and [worse] things", 
+                           "(bad:0.9) and (worse:0.9) things",
+                           "Multiple negative attention blocks");
+
+            // Negative attention with variants
+            AssertTransform("[some {a|b|c} text]", 
+                           "(some <random:a|b|c> text:0.9)",
+                           "Negative attention with variants");
+
+            // Negative attention with wildcards
+            AssertTransform("[some __wildcard__ text]", 
+                           "(some <wildcard:wildcard> text:0.9)",
+                           "Negative attention with wildcards");
+
+            // Negative attention with quantified wildcards
+            AssertTransform("[some {2$$__wildcard__} text]", 
+                           "(some <wildcard[2,]:wildcard> text:0.9)",
+                           "Negative attention with quantified wildcards");
+
+            // Negative attention with complex SwarmUI syntax
+            AssertTransform("[some <random[3,]this|variant|already|in|swarm|syntax> text]", 
+                           "(some <random[3,]this|variant|already|in|swarm|syntax> text:0.9)",
+                           "Negative attention with SwarmUI syntax");
+
+            // Complex example from user request
+            AssertTransform("[some {a|b|c} __somewildcard__ {2$$__somewildcard__} <random[3,]this|variant|already|in|swarm|syntax>]", 
+                           "(some <random:a|b|c> <wildcard:somewildcard> <wildcard[2,]:somewildcard> <random[3,]this|variant|already|in|swarm|syntax>:0.9)",
+                           "Complex negative attention example");
+
+            // Negative attention with variables
+            AssertTransform("[${color=red} ${color} car]", 
+                           "(<setmacro[color,false]:red> <macro:color> car:0.9)",
+                           "Negative attention with variables");
+
+            // Nested negative attention (inner brackets should also be processed)
+            AssertTransform("[outer [inner] text]", 
+                           "(outer (inner:0.9) text:0.9)",
+                           "Nested negative attention brackets");
+            
+            AssertTransform("[[[light]]]",
+                "(light:0.729)", // 0.729 = Pow(0.9, 3) rounded to 3 decimals
+                "Nested negative attention should collapse into single attention with weight = 0.9^nestLevel");
+
+            // Empty negative attention
+            AssertTransform("[]", 
+                           "(:0.9)",
+                           "Empty negative attention");
+
+            // Negative attention with whitespace
+            AssertTransform("[ some text ]", 
+                           "( some text :0.9)",
+                           "Negative attention with whitespace");
+
+            // Multiple negative attention in complex text
+            AssertTransform("A [bad] person with {red|blue} hair and [terrible] attitude", 
+                           "A (bad:0.9) person with <random:red|blue> hair and (terrible:0.9) attitude",
+                           "Multiple negative attention in complex text");
+
+            // Negative attention with escaped brackets (should not transform)
+            AssertTransform("This \\[should not transform\\]", 
+                           "This \\[should not transform\\]",
+                           "Escaped negative attention brackets");
         }
 
         #endregion
