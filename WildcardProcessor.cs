@@ -322,6 +322,8 @@ namespace Spoomples.Extensions.WildcardImporter
 
         private string ProcessWildcardLine(string line, string taskId)
         {
+            Logs.Verbose($"WildcardProcessor: ProcessWildcardLine called with line='{line}'");
+            
             // See https://github.com/adieyal/sd-dynamic-prompts/blob/main/docs/SYNTAX.md#wildcards
             // Replace __wildcards__
             // Matches should include:
@@ -533,19 +535,33 @@ namespace Spoomples.Extensions.WildcardImporter
         private string ProcessQuantifierVariant(string content, string fullMatch, ProcessingTask task)
         {
             // Try to match the quantifier pattern
-            var match = System.Text.RegularExpressions.Regex.Match(content, @"^((?:\d+-\d+|-\d+|\d+-|\d+))\$\$(.*?)(?:\$\$)?(.*)$");
+            // Pattern handles: 2$$options or 2$$separator$$options
+            var match = System.Text.RegularExpressions.Regex.Match(content, @"^((?:\d+-\d+|-\d+|\d+-|\d+))\$\$(.*)$");
+            
+            Logs.Debug($"WildcardProcessor: Regex match success={match.Success}");
             
             if (match.Success)
             {
                 string quantifierSpec = "";
                 string numberPart = match.Groups[1].Value;
-                string customSeparator = match.Groups[2].Value;
-                string optionsPart = match.Groups[3].Value;
+                string remainingPart = match.Groups[2].Value;
                 
-                // Log warning if custom separator is found
-                if (!string.IsNullOrEmpty(customSeparator))
+                // Check if there's a custom separator (pattern: separator$$options)
+                // But ignore $$ inside nested structures like <wildcard:...> or {...}
+                string customSeparator = "";
+                string optionsPart = remainingPart;
+                
+                int separatorIndex = FindCustomSeparatorIndex(remainingPart);
+                if (separatorIndex >= 0)
                 {
-                    task.AddWarning($"Custom separator in variant not supported: {fullMatch}");
+                    customSeparator = remainingPart.Substring(0, separatorIndex);
+                    optionsPart = remainingPart.Substring(separatorIndex + 2); // Skip the $$
+                    
+                    // Log warning if custom separator is found
+                    if (!string.IsNullOrEmpty(customSeparator))
+                    {
+                        task.AddWarning($"Custom separator in variant not supported: {fullMatch}");
+                    }
                 }
                 
                 // Handle ranges
@@ -558,6 +574,18 @@ namespace Spoomples.Extensions.WildcardImporter
                     // Simple quantifier: {2$$...}
                     quantifierSpec = $"[{numberPart},]";
                 }
+                
+                // Special case: Single wildcard with quantifier should become <wildcard[quantifier]:name>
+                // Example: {2$$__flavours__} should become <wildcard[2,]:flavours> not <random[2,]:<wildcard:flavours>>
+                Logs.Debug($"WildcardProcessor: Checking single wildcard for optionsPart='{optionsPart}'");
+                if (IsSingleWildcard(optionsPart))
+                {
+                    string wildcardName = ExtractWildcardName(optionsPart);
+                    string result = $"<wildcard{quantifierSpec}:{wildcardName}>";
+                    Logs.Debug($"WildcardProcessor: Single wildcard detected, returning '{result}'");
+                    return result;
+                }
+                Logs.Debug($"WildcardProcessor: Not a single wildcard, proceeding with normal variant processing");
                 
                 return ProcessVariantOptions(optionsPart, quantifierSpec);
             }
@@ -854,6 +882,101 @@ namespace Spoomples.Extensions.WildcardImporter
                 result = GCD(result, number);
             }
             return result;
+        }
+
+        /// <summary>
+        /// Finds the index of a custom separator $$ that is not inside nested structures.
+        /// </summary>
+        /// <param name="text">The text to search in.</param>
+        /// <returns>The index of the custom separator, or -1 if not found.</returns>
+        private int FindCustomSeparatorIndex(string text)
+        {
+            int braceDepth = 0;
+            int angleDepth = 0;
+            
+            for (int i = 0; i < text.Length - 1; i++)
+            {
+                char c = text[i];
+                
+                // Track nesting depth
+                if (c == '{') braceDepth++;
+                else if (c == '}') braceDepth--;
+                else if (c == '<') angleDepth++;
+                else if (c == '>') angleDepth--;
+                
+                // Check for $$ only when we're not inside nested structures
+                if (c == '$' && text[i + 1] == '$' && braceDepth == 0 && angleDepth == 0)
+                {
+                    return i;
+                }
+            }
+            
+            return -1; // No custom separator found
+        }
+
+        /// <summary>
+        /// Checks if the options part contains only a single wildcard (no | separators at the top level).
+        /// A single wildcard can be simple like <wildcard:name> or complex like <wildcard:<random[1,]:cat|dog>s>.
+        /// </summary>
+        /// <param name="optionsPart">The options part to check.</param>
+        /// <returns>True if it's a single wildcard, false otherwise.</returns>
+        private bool IsSingleWildcard(string optionsPart)
+        {
+            if (string.IsNullOrEmpty(optionsPart))
+            {
+                return false;
+            }
+            
+            string trimmed = optionsPart.Trim();
+            
+            // Must start with <wildcard: and end with >
+            if (!trimmed.StartsWith("<wildcard:") || !trimmed.EndsWith(">"))
+            {
+                return false;
+            }
+            
+            // Check if there are any | separators at the top level (not inside nested structures)
+            return !HasTopLevelPipeSeparators(trimmed);
+        }
+
+        /// <summary>
+        /// Checks if a string has pipe separators at the top level (not inside nested structures).
+        /// </summary>
+        /// <param name="text">The text to check.</param>
+        /// <returns>True if there are top-level pipe separators, false otherwise.</returns>
+        private bool HasTopLevelPipeSeparators(string text)
+        {
+            int braceDepth = 0;
+            int angleDepth = 0;
+            
+            foreach (char c in text)
+            {
+                if (c == '{') braceDepth++;
+                else if (c == '}') braceDepth--;
+                else if (c == '<') angleDepth++;
+                else if (c == '>') angleDepth--;
+                else if (c == '|' && braceDepth == 0 && angleDepth == 0)
+                {
+                    return true; // Found a top-level pipe separator
+                }
+            }
+            
+            return false;
+        }
+
+        /// <summary>
+        /// Extracts the wildcard name from a processed wildcard pattern (removes the <wildcard: and > delimiters).
+        /// </summary>
+        /// <param name="wildcardOption">The wildcard option like <wildcard:flavours> or <wildcard:<random[1,]:cat|dog>s>.</param>
+        /// <returns>The wildcard name like flavours or <random[1,]:cat|dog>s.</returns>
+        private string ExtractWildcardName(string wildcardOption)
+        {
+            string trimmed = wildcardOption.Trim();
+            if (trimmed.StartsWith("<wildcard:") && trimmed.EndsWith(">") && trimmed.Length > 11)
+            {
+                return trimmed.Substring(10, trimmed.Length - 11);
+            }
+            return wildcardOption; // Fallback, should not happen if IsSingleWildcard returned true
         }
 
         public ProgressStatus GetStatus(string taskId)
