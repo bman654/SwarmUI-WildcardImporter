@@ -344,6 +344,10 @@ namespace Spoomples.Extensions.WildcardImporter
             // [from:to:step] -> <fromto[step]:from||to>
             line = ProcessPromptEditing(line, _tasks[taskId]);
             
+            // Process alternating words AFTER prompt editing but BEFORE negative attention
+            // [word1|word2|word3] -> <alternate:word1||word2||word3>
+            line = ProcessAlternatingWords(line, _tasks[taskId]);
+            
             // Process negative attention specifiers: [text] -> (text:0.9)
             line = ProcessNegativeAttention(line);
 
@@ -434,6 +438,135 @@ namespace Spoomples.Extensions.WildcardImporter
             }
             
             return result.ToString();
+        }
+
+        private string ProcessAlternatingWords(string input, ProcessingTask task)
+        {
+            var result = new StringBuilder(input);
+            var startIndex = 0;
+            
+            while (true)
+            {
+                // Find the next bracket that could be alternating words
+                var bracketStartIndex = result.ToString().IndexOf("[", startIndex, StringComparison.Ordinal);
+                if (bracketStartIndex == -1)
+                    break;
+                
+                // Check if this bracket is escaped
+                if (bracketStartIndex > 0 && result[bracketStartIndex - 1] == '\\')
+                {
+                    startIndex = bracketStartIndex + 1;
+                    continue;
+                }
+                
+                // Check if this bracket is part of SwarmUI syntax (inside < >)
+                if (IsInsideSwarmUITag(result.ToString(), bracketStartIndex))
+                {
+                    startIndex = bracketStartIndex + 1;
+                    continue;
+                }
+                
+                // Find the matching closing bracket
+                int closeBracketIndex = FindMatchingClosingSquareBracket(result.ToString(), bracketStartIndex);
+                
+                if (closeBracketIndex == -1)
+                {
+                    // No matching closing bracket found, move past this opening and continue
+                    startIndex = bracketStartIndex + 1;
+                    continue;
+                }
+                
+                // Extract the content inside the brackets (without the [])
+                string content = result.ToString().Substring(bracketStartIndex + 1, closeBracketIndex - bracketStartIndex - 1);
+                
+                // Check if this is alternating words syntax: [word1|word2|...]
+                if (IsAlternatingWordsSyntax(content))
+                {
+                    // Process as alternating words
+                    string replacement = ProcessAlternatingWordsContent(content, task);
+                    
+                    // Replace the entire alternating words expression with the new format
+                    result.Remove(bracketStartIndex, closeBracketIndex - bracketStartIndex + 1);
+                    result.Insert(bracketStartIndex, replacement);
+                    
+                    // Update the start index for the next search
+                    startIndex = bracketStartIndex + replacement.Length;
+                }
+                else
+                {
+                    // Not alternating words, skip this bracket
+                    startIndex = bracketStartIndex + 1;
+                }
+            }
+            
+            return result.ToString();
+        }
+        
+        /// <summary>
+        /// Checks if the content inside brackets matches alternating words syntax: word1|word2|...
+        /// Must have at least 2 options separated by pipes at the top level.
+        /// </summary>
+        /// <param name="content">The content inside the brackets.</param>
+        /// <returns>True if it's alternating words syntax, false otherwise.</returns>
+        private bool IsAlternatingWordsSyntax(string content)
+        {
+            // Find pipes at the top level (not inside nested structures)
+            char[] openChars = { '{', '[', '<' };
+            char[] closeChars = { '}', ']', '>' };
+            
+            var pipeIndices = new List<int>();
+            int searchStart = 0;
+            
+            while (true)
+            {
+                int pipeIndex = FindTopLevelChar(content, searchStart, '|', openChars, closeChars);
+                if (pipeIndex == -1)
+                    break;
+                    
+                pipeIndices.Add(pipeIndex);
+                searchStart = pipeIndex + 1;
+            }
+            
+            // Must have at least 1 pipe (meaning at least 2 options) for alternating words
+            // If no pipes, it should be treated as negative attention
+            return pipeIndices.Count >= 1;
+        }
+        
+        /// <summary>
+        /// Processes alternating words content and converts it to SwarmUI syntax.
+        /// </summary>
+        /// <param name="content">The content inside the brackets: word1|word2|word3</param>
+        /// <param name="task">The processing task for context.</param>
+        /// <returns>The converted SwarmUI syntax: &lt;alternate:word1||word2||word3&gt;</returns>
+        private string ProcessAlternatingWordsContent(string content, ProcessingTask task)
+        {
+            // Split on pipes at the top level
+            char[] openChars = { '{', '[', '<' };
+            char[] closeChars = { '}', ']', '>' };
+            
+            var options = new List<string>();
+            int lastIndex = 0;
+            
+            while (true)
+            {
+                int pipeIndex = FindTopLevelChar(content, lastIndex, '|', openChars, closeChars);
+                if (pipeIndex == -1)
+                {
+                    // Add the last option
+                    string lastOption = content.Substring(lastIndex);
+                    options.Add(string.IsNullOrEmpty(lastOption.Trim()) ? "<comment:empty>" : lastOption);
+                    break;
+                }
+                
+                // Add the current option
+                string option = content.Substring(lastIndex, pipeIndex - lastIndex);
+                options.Add(string.IsNullOrEmpty(option.Trim()) ? "<comment:empty>" : option);
+                
+                lastIndex = pipeIndex + 1;
+            }
+            
+            // Join with double pipes for SwarmUI alternate syntax
+            return $"<alternate:{string.Join("||", options)}>";
         }
 
         private string ProcessPromptEditing(string input, ProcessingTask task)

@@ -51,6 +51,9 @@ namespace Spoomples.Extensions.WildcardImporter
             // Test prompt editing
             TestPromptEditing();
 
+            // Test alternating words
+            TestAlternatingWords();
+
             // Test negative attention
             TestNegativeAttention();
 
@@ -410,6 +413,85 @@ namespace Spoomples.Extensions.WildcardImporter
             AssertTransform("[text\\:with\\:colons:target:5] test", 
                            "<fromto[5]:text\\:with\\:colons||target> test",
                            "Prompt editing with escaped colons");
+        }
+
+        #endregion
+
+        #region Test Alternating Words
+
+        private static void TestAlternatingWords()
+        {
+            // Basic alternating words: [word1|word2]
+            AssertTransform("[cow|horse] in a field", 
+                           "<alternate:cow||horse> in a field",
+                           "Basic alternating words");
+
+            // Single word (should not be treated as alternating)
+            AssertTransform("[cow] in a field", 
+                           "(cow:0.9) in a field",
+                           "Single word treated as negative attention");
+
+            // Multiple alternating words: [word1|word2|word3|word4]
+            AssertTransform("[cow|cow|horse|man|siberian tiger|ox|man] in a field", 
+                           "<alternate:cow||cow||horse||man||siberian tiger||ox||man> in a field",
+                           "Multiple alternating words");
+
+            // Multiple alternating sequences in one line
+            AssertTransform("[red|blue] car with [big|small] wheels", 
+                           "<alternate:red||blue> car with <alternate:big||small> wheels",
+                           "Multiple alternating sequences");
+
+            // Alternating words with variants inside
+            AssertTransform("[{red|crimson}|blue] car", 
+                           "<alternate:<random:red|crimson>||blue> car",
+                           "Alternating words with variant in option");
+
+            // Alternating words with wildcards inside
+            AssertTransform("[__colors__|blue] background", 
+                           "<alternate:<wildcard:colors>||blue> background",
+                           "Alternating words with wildcard in option");
+
+            // Alternating words with variables inside
+            AssertTransform("[${color}|blue] car", 
+                           "<alternate:<macro:color>||blue> car",
+                           "Alternating words with variable in option");
+
+            // Complex nesting with alternating words
+            AssertTransform("[{red|__colors__}|{blue|green}] complex", 
+                           "<alternate:<random:red|<wildcard:colors>>||<random:blue|green>> complex",
+                           "Alternating words with complex nested content");
+
+            // Alternating words should be processed AFTER prompt editing
+            // This ensures [from:to:step] is handled before [word1|word2]
+            AssertTransform("[girl:boy:5] and [red|blue] car", 
+                           "<fromto[5]:girl||boy> and <alternate:red||blue> car",
+                           "Alternating words processed after prompt editing");
+
+            // Empty options in alternating words
+            AssertTransform("[red||blue] car", 
+                           "<alternate:red||<comment:empty>||blue> car",
+                           "Alternating words with empty option");
+
+            // Alternating words with escaped pipes
+            AssertTransform("[red\\|crimson|blue] car", 
+                           "<alternate:red\\|crimson||blue> car",
+                           "Alternating words with escaped pipe");
+
+            // Edge case: alternating words should not conflict with negative attention
+            // Single option should be negative attention, multiple should be alternating
+            AssertTransform("[single] vs [first|second]", 
+                           "(single:0.9) vs <alternate:first||second>",
+                           "Single vs multiple options handling");
+
+            // More realistic nested alternating words
+            AssertTransform("[red {bright|dark}|blue] car", 
+                           "<alternate:red <random:bright|dark>||blue> car",
+                           "Alternating words with nested variant");
+
+            // Complex but realistic alternating with wildcards
+            AssertTransform("[__colors__ bright|dark __shades__] theme", 
+                           "<alternate:<wildcard:colors> bright||dark <wildcard:shades>> theme",
+                           "Alternating words with realistic complex nesting");
         }
 
         #endregion
