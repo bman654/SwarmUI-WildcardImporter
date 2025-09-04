@@ -227,7 +227,7 @@ namespace Spoomples.Extensions.WildcardImporter
             T2IPromptHandling.PromptTagProcessors["wcnegative"] = (data, context) =>
             {
                 var current = context.Input.Get(T2IParamTypes.NegativePrompt) ?? "";
-                var updated = context.PreData.ToLowerFast() == "prepend" ? $"{data}{current}" : $"{current}{data}";
+                var updated = context.PreData?.ToLowerFast() == "prepend" ? $"{data}{current}" : $"{current}{data}";
                 context.Input.Set(T2IParamTypes.NegativePrompt, updated);
                 return "";
             };
@@ -243,7 +243,8 @@ namespace Spoomples.Extensions.WildcardImporter
              */
             T2IPromptHandling.PromptTagProcessors["wcaddvar"] = (data, context) =>
             {
-                string name = context.PreData.BeforeAndAfter(',', out string mode);
+                string mode = "append";
+                string name = context.PreData?.BeforeAndAfter(',', out mode);
                 if (string.IsNullOrWhiteSpace(name))
                 {
                     context.TrackWarning($"A variable name is required when using wcaddvar.");
@@ -252,7 +253,7 @@ namespace Spoomples.Extensions.WildcardImporter
                 
                 data = context.Parse(data);
                 var currentValue = context.Variables.GetValueOrDefault(name, "");
-                context.Variables[name] = mode.ToLowerFast() == "prepend" ? $"{data}{currentValue}" : $"{currentValue}{data}";
+                context.Variables[name] = mode?.ToLowerFast() == "prepend" ? $"{data}{currentValue}" : $"{currentValue}{data}";
                 return "";
             };
 
@@ -267,14 +268,15 @@ namespace Spoomples.Extensions.WildcardImporter
              */
             T2IPromptHandling.PromptTagProcessors["wcaddmacro"] = (data, context) =>
             {
-                string name = context.PreData.BeforeAndAfter(',', out string mode);
+                string mode = "append";
+                string name = context.PreData?.BeforeAndAfter(',', out mode);
                 if (string.IsNullOrWhiteSpace(name))
                 {
                     context.TrackWarning($"A macro name is required when using wcaddmacro.");
                     return null;
                 }
                 var currentValue = context.Macros.GetValueOrDefault(name, "");
-                context.Macros[name] = mode.ToLowerFast() == "prepend" ? $"{data}{currentValue}" : $"{currentValue}{data}";
+                context.Macros[name] = mode?.ToLowerFast() == "prepend" ? $"{data}{currentValue}" : $"{currentValue}{data}";
                 return "";
             };
             T2IPromptHandling.PromptTagLengthEstimators["wcaddmacro"] = (data, context) => "";
