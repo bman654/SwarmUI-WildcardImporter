@@ -3,6 +3,7 @@ namespace Spoomples.Extensions.WildcardImporter
     using System.Runtime.CompilerServices;
     using FreneticUtilities.FreneticExtensions;
     using SwarmUI.Text2Image;
+    using SwarmUI.Utils;
 
     public static class PromptDirectives
     {
@@ -71,6 +72,150 @@ namespace Spoomples.Extensions.WildcardImporter
             AddVariable();
             AddMacro();
             Match();
+            EnhancedRandom();
+        }
+
+        public static (int, string) InterpretPredataForRandom(string prefix, string preData, string data, T2IPromptHandling.PromptTagContext context)
+        {
+            int count = 1;
+            string separator = " ";
+            if (preData is not null)
+            {
+                if (preData.Contains(','))
+                {
+                    (preData, separator) = preData.BeforeAndAfter(',');
+                    if (separator == "")
+                    {
+                        separator = ", ";
+                    }
+                }
+                double? countVal = T2IPromptHandling.InterpretNumber(preData, context);
+                if (!countVal.HasValue)
+                {
+                    Logs.Warning($"Random input '{prefix}[{preData}]:{data}' has invalid predata count (not a number) and will be ignored.");
+                    return (0, null);
+                }
+                count = (int)countVal.Value;
+            }
+            return (count, separator);
+        }
+
+        record struct WeightedChoice(string Value, double Weight)
+        {
+            public WeightedChoice(string rawString) : this(rawString, 1.0)
+            {
+                int colonIndex = rawString.IndexOf("::", StringComparison.Ordinal);
+                if (colonIndex > 0)
+                {
+                    string weightPart = rawString.Substring(0, colonIndex);
+                    string valuePart = rawString.Substring(colonIndex + 2);
+
+                    // Try to parse the weight part as a positive number
+                    if (double.TryParse(weightPart, out double parsedWeight) && parsedWeight > 0)
+                    {
+                        Value = valuePart;
+                        Weight = parsedWeight;
+                        return;
+                    }
+                }
+            }
+        }
+
+        record WeightedSet(List<WeightedChoice> Choices)
+        {
+            double TotalWeight { get; set; }
+
+            public WeightedSet(string[] rawVals) : this(new List<WeightedChoice>(rawVals.Length))
+            {
+                TotalWeight = 0;
+                foreach (string rawString in rawVals)
+                {
+                    var choice = new WeightedChoice(rawString);
+                    Choices.Add(choice);
+                    TotalWeight += choice.Weight;
+                }
+            }
+
+            public string TakeRandom(T2IPromptHandling.PromptTagContext context)
+            {
+                if (context.Input.Get(T2IParamTypes.WildcardSeedBehavior, "Random") == "Index")
+                {
+                    int index = context.Input.GetWildcardSeed() % Choices.Count;
+                    var choice = Choices[index];
+                    Choices.RemoveAt(index);
+                    TotalWeight -= choice.Weight;
+                    return choice.Value;
+                }
+
+                double random = context.Input.GetWildcardRandom().NextDouble() * TotalWeight;
+                int i = 0;
+                int stop = Choices.Count - 1;
+                while (i < stop && random > Choices[i].Weight)
+                {
+                    random -= Choices[i].Weight;
+                    i++;
+                }
+                var c = Choices[i];
+                Choices.RemoveAt(i);
+                TotalWeight -= c.Weight;
+                return c.Value;
+            }
+        }
+
+        private static void EnhancedRandom()
+        {
+            /*
+               use " " as the separator:
+               <wcrandom[1-3]:a|0.3::b|6::c|d>
+               
+               use ", " as the separator:
+               <wcrandom[1-3,]:a|0.3::b|6::c|d>
+               
+               use "custom-separator" as the separator:
+               <wcrandom[1-3,custom-separator]:a|0.3::b|6::c|d>
+             */
+            T2IPromptHandling.PromptTagProcessors["wcrandom"] = (data, context) =>
+            {
+                (int count, string partSeparator) = InterpretPredataForRandom("wcrandom", context.PreData, data, context);
+                if (partSeparator is null)
+                {
+                    return null;
+                }
+                string[] rawVals = T2IPromptHandling.SplitSmart(data);
+                if (rawVals.Length == 0)
+                {
+                    context.TrackWarning($"Random input '{data}' is empty and will be ignored.");
+                    return null;
+                }
+                string result = "";
+                var set = new WeightedSet(rawVals);
+                for (int i = 0; i < count; i++)
+                {
+                    string choice = set.TakeRandom(context);
+                    result += context.Parse(choice).Trim() + partSeparator;
+                    if (set.Choices.Count == 0)
+                    {
+                        set = new WeightedSet(rawVals);
+                    }
+                }
+                return result.Trim();
+            };
+            T2IPromptHandling.PromptTagLengthEstimators["wcrandom"] = (data, context) =>
+            {
+                string[] rawVals = T2IPromptHandling.SplitSmart(data);
+                int longest = 0;
+                string longestStr = "";
+                foreach (string val in rawVals)
+                {
+                    string interp = T2IPromptHandling.ProcessPromptLikeForLength(new WeightedChoice(val).Value);
+                    if (interp.Length > longest)
+                    {
+                        longest = interp.Length;
+                        longestStr = interp;
+                    }
+                }
+                return longestStr;
+            };
         }
 
         private static void AddNegativePrompt()
