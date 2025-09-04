@@ -737,3 +737,67 @@ promptTabComplete.registerPrefix('wcdetailer', 'Automatically segment an area by
 });
 
 // End of WCDetailer completion system
+
+promptTabComplete.registerPrefix('wcrandom', 'Selects from a set of random words to include', (prefix) => {
+    return [
+        '\nSpecify a comma-separated list of words to choose from, like "<wcrandom:cat,dog,elephant>".', 
+        '\nYou can use "||" instead of "," if you need to include commas in your values.'
+    ];
+});
+promptTabComplete.registerPrefix('wcrandom[2-4]', 'Selects multiple options from a set of random words to include', (prefix) => {
+    return [
+        '\nSpecify a comma-separated list of words to choose from, like "<wcrandom[2]:cat,dog,elephant>".', 
+        '\nYou can use "||" instead of "," if you need to include commas in your values.', 
+        '\nPut a comma in the input (eg "<wcrandom[2,]:red,green,blue>") to separate the results with commas.',
+        '\nOr use a custom separator by placing something after the comma (eg "<wcrandom[2, and ]:red,green,blue>").'
+    ];
+});
+
+promptTabComplete.registerPrefix('wcnegative', 'Appends text to the negative prompt', (prefix) => {
+    return [
+        '\nAppends text to the negative prompt, like "<wcnegative:blurry, low quality>".',
+        '\nUse "[prepend]" to add to the beginning: "<wcnegative[prepend]:worst quality, >".'
+    ];
+});
+
+promptTabComplete.registerPrefix('wcnegative[prepend]', 'Prepends text to the negative prompt', (prefix) => {
+    return [
+        '\nPrepends text to the negative prompt, like "<wcnegative[prepend]:worst quality, >".'
+    ];
+});
+
+promptTabComplete.registerPrefix('wcaddvar[var_name]', 'Appends or prepends content to an existing variable', (prefix) => {
+    return [
+        '\nModifies existing variables created with <setvar>.',
+        '\nSyntax: "<wcaddvar[variable_name]:content to add>"',
+        '\nUse prepend mode: "<wcaddvar[variable_name,prepend]:content to prepend>"',
+        '\nCreates the variable if it doesn\'t exist.'
+    ];
+});
+
+promptTabComplete.registerPrefix('wcaddmacro[macro_name]', 'Appends or prepends content to an existing macro', (prefix) => {
+    return [
+        '\nModifies existing macros created with <setmacro>.',
+        '\nSyntax: "<wcaddmacro[macro_name]:content to add>"',
+        '\nUse prepend mode: "<wcaddmacro[macro_name,prepend]:content to prepend>"',
+        '\nCreates the macro if it doesn\'t exist.'
+    ];
+});
+
+promptTabComplete.registerPrefix('wcmatch', 'Provides conditional logic for prompts using expression evaluation', (prefix) => {
+    return [
+        '\nUse with <wccase> blocks to create conditional content.',
+        '\nExample: "<wcmatch:<wccase[myvar == \\"value\\"]:content if true><wccase:default content>>"',
+        '\nSupports variable comparisons, logical operators (&&, ||), and string functions.',
+        '\nOnly the first matching case will be rendered.'
+    ];
+});
+
+promptTabComplete.registerPrefix('wccase[var_name == "value"]', 'Conditional case block used within <wcmatch>', (prefix) => {
+    return [
+        '\nMust be used inside a <wcmatch> block.',
+        '\nWith condition: "<wccase[condition]:content if condition is true>"',
+        '\nDefault case: "<wccase:content if no other cases match>"',
+        '\nSupports expressions like: myvar == "value", contains(myvar, "text"), length(myvar) > 5'
+    ];
+});
