@@ -340,6 +340,18 @@ namespace Spoomples.Extensions.WildcardImporter
             
             line = ProcessVariables(line, _tasks[taskId]);
             
+            // Process set commands BEFORE other processing
+            line = ProcessSetCommands(line, _tasks[taskId]);
+            
+            // Process echo commands BEFORE other processing
+            line = ProcessEchoCommands(line, _tasks[taskId]);
+            
+            // Process if commands BEFORE other processing
+            line = ProcessIfCommands(line, _tasks[taskId]);
+            
+            // Process STN commands BEFORE other processing
+            line = ProcessStnCommands(line, _tasks[taskId]);
+            
             // Process prompt editing BEFORE negative attention to avoid conflicts
             // [from:to:step] -> <fromto[step]:from||to>
             line = ProcessPromptEditing(line, _tasks[taskId]);
@@ -403,30 +415,109 @@ namespace Spoomples.Extensions.WildcardImporter
                 string varContent = result.ToString().Substring(varStartIndex + 2, closeBraceIndex - varStartIndex - 2);
                 string replacement;
                 
-                // Check if this is a variable assignment or access
-                int equalsIndex = varContent.IndexOf('=');
-                if (equalsIndex != -1)
+                // Check for completely empty variable content: ${}
+                if (string.IsNullOrWhiteSpace(varContent))
                 {
-                    // Variable assignment
+                    // Return original malformed syntax - move past this and continue
+                    startIndex = varStartIndex + 2;
+                    continue;
+                }
+                // Check if this is a variable assignment or access
+                else if (varContent.IndexOf('=') != -1)
+                {
+                    int equalsIndex = varContent.IndexOf('=');
+                    // Variable assignment - check for special operators
                     string varName = varContent.Substring(0, equalsIndex);
                     string varValue = varContent.Substring(equalsIndex + 1);
                     
-                    // Immediate or deferred?
-                    if (varValue.StartsWith("!"))
+                    // Check for add operator (+=)
+                    if (varName.EndsWith("+"))
                     {
-                        varValue = varValue.Substring(1);
-                        replacement = $"<setvar[{varName},false]:{varValue}><setmacro[{varName},false]:<var:{varName}>>";
+                        varName = varName.Substring(0, varName.Length - 1);
+                        
+                        // Immediate add or deferred add?
+                        if (varValue.StartsWith("!"))
+                        {
+                            varValue = varValue.Substring(1);
+                            // Immediate add: ${var+=!value} -> <setvar[var,false]:<macro:var>, value><setmacro[var,false]:<var:var>>
+                            replacement = $"<setvar[{varName},false]:<macro:{varName}>, {varValue}><setmacro[{varName},false]:<var:{varName}>>";
+                        }
+                        else
+                        {
+                            // Deferred add: ${var+=value} -> <wcaddmacro[var]:, value>
+                            replacement = $"<wcaddmacro[{varName}]:, {varValue}>";
+                        }
+                    }
+                    // Check for ifundefined operator (?=)
+                    else if (varName.EndsWith("?"))
+                    {
+                        varName = varName.Substring(0, varName.Length - 1);
+                        
+                        // Immediate ifundefined or deferred ifundefined?
+                        if (varValue.StartsWith("!"))
+                        {
+                            varValue = varValue.Substring(1);
+                            // Immediate ifundefined: ${var?=!value} -> <wcmatch:<wccase[length(var) == 0]:<setvar[var,false]:value><setmacro[var,false]:<var:var>>>>
+                            replacement = $"<wcmatch:<wccase[length({varName}) == 0]:<setvar[{varName},false]:{varValue}><setmacro[{varName},false]:<var:{varName}>>>>";
+                        }
+                        else
+                        {
+                            // Deferred ifundefined: ${var?=value} -> <wcmatch:<wccase[length(var) == 0]:<setmacro[var,false]:value>>>
+                            replacement = $"<wcmatch:<wccase[length({varName}) == 0]:<setmacro[{varName},false]:{varValue}>>>";
+                        }
                     }
                     else
                     {
-                        // deferred
-                        replacement = $"<setmacro[{varName},false]:{varValue}>";
+                        // Regular assignment
+                        // Immediate or deferred?
+                        if (varValue.StartsWith("!"))
+                        {
+                            varValue = varValue.Substring(1);
+                            replacement = $"<setvar[{varName},false]:{varValue}><setmacro[{varName},false]:<var:{varName}>>";
+                        }
+                        else
+                        {
+                            // deferred
+                            replacement = $"<setmacro[{varName},false]:{varValue}>";
+                        }
                     }
                 }
                 else
                 {
-                    // Variable access
-                    replacement = $"<macro:{varContent}>";
+                    // Variable access - check for default value syntax: ${var:default}
+                    int colonIndex = varContent.IndexOf(':');
+                    if (colonIndex != -1)
+                    {
+                        // Variable with default: ${var:default}
+                        string variableName = varContent.Substring(0, colonIndex).Trim();
+                        string defaultValue = varContent.Substring(colonIndex + 1);
+                        
+                        // Check for malformed cases (empty variable name)
+                        if (string.IsNullOrWhiteSpace(variableName))
+                        {
+                            // Return original malformed syntax - move past this and continue
+                            startIndex = varStartIndex + 2;
+                            continue;
+                        }
+                        else if (string.IsNullOrEmpty(defaultValue))
+                        {
+                            // Empty default, just return <macro:varname>
+                            replacement = $"<macro:{variableName}>";
+                        }
+                        else
+                        {
+                            // Process the default value recursively to handle nested syntax
+                            string processedDefault = ProcessWildcardLine(defaultValue, task.Id);
+                            
+                            // Return wcmatch with condition for empty variable and else clause
+                            replacement = $"<wcmatch:<wccase[length({variableName}) == 0]:{processedDefault}><wccase:<macro:{variableName}>>>";
+                        }
+                    }
+                    else
+                    {
+                        // Simple variable access: ${var}
+                        replacement = $"<macro:{varContent}>";
+                    }
                 }
                 
                 // Replace the entire variable expression with the new format
@@ -435,6 +526,136 @@ namespace Spoomples.Extensions.WildcardImporter
                 
                 // Update the start index for the next search
                 startIndex = varStartIndex + replacement.Length;
+            }
+            
+            return result.ToString();
+        }
+
+        private string ProcessSetCommands(string input, ProcessingTask task)
+        {
+            /*
+             * Long-form set commands look like:
+             * - <ppp:set varname>value<ppp:/set> -> <setmacro[varname,false]:value>
+             * - <ppp:set varname evaluate>value<ppp:/set> -> <setvar[varname,false]:value><setmacro[varname,false]:<var:varname>>
+             * - <ppp:set varname add>value<ppp:/set> -> <wcaddmacro[varname]:, value>
+             * - <ppp:set varname evaluate add>value<ppp:/set> -> <setvar[varname,false]:<macro:varname>, value><setmacro[varname,false]:<var:varname>>
+             * - <ppp:set varname ifundefined>value<ppp:/set> -> <wcmatch:<wccase[length(varname) == 0]:<setmacro[varname,false]:value>>>
+             * - <ppp:set varname evaluate ifundefined>value<ppp:/set> -> <wcmatch:<wccase[length(varname) == 0]:<setvar[varname,false]:value><setmacro[varname,false]:<var:varname>>>>
+             */
+            var result = new StringBuilder(input);
+            var startIndex = 0;
+            
+            while (true)
+            {
+                // Find the next set command pattern
+                var setStartIndex = result.ToString().IndexOf("<ppp:set ", startIndex, StringComparison.Ordinal);
+                if (setStartIndex == -1)
+                    break;
+                
+                // Find the matching closing tag
+                var setEndIndex = result.ToString().IndexOf("<ppp:/set>", setStartIndex, StringComparison.Ordinal);
+                if (setEndIndex == -1)
+                {
+                    // No matching closing tag found, move past this opening and continue
+                    task.AddWarning("Malformed set command: no closing <ppp:/set> tag found");
+                    startIndex = setStartIndex + 9; // length of "<ppp:set "
+                    continue;
+                }
+                
+                // Extract the set command content
+                string setContent = result.ToString().Substring(setStartIndex + 9, setEndIndex - setStartIndex - 9); // 9 = length of "<ppp:set "
+                
+                // Find where the variable name and modifiers end (look for >)
+                int valueStartIndex = setContent.IndexOf('>');
+                if (valueStartIndex == -1)
+                {
+                    // Malformed set command, skip it
+                    task.AddWarning("Malformed set command missing closing >: <ppp:set " + setContent + "<ppp:/set>");
+                    startIndex = setStartIndex + 9;
+                    continue;
+                }
+                
+                string varAndModifiers = setContent.Substring(0, valueStartIndex).Trim();
+                string value = setContent.Substring(valueStartIndex + 1);
+                
+                // Handle empty values
+                if (string.IsNullOrEmpty(value))
+                {
+                    value = "<comment:empty>";
+                }
+                
+                // Parse variable name and modifiers
+                string[] parts = varAndModifiers.Split(new char[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length == 0)
+                {
+                    // No variable name, skip
+                    task.AddWarning("Malformed set command: no variable name specified: <ppp:set " + setContent + "<ppp:/set>");
+                    startIndex = setStartIndex + 9;
+                    continue;
+                }
+                
+                string varName = parts[0];
+                var modifiers = new HashSet<string>(parts.Skip(1), StringComparer.OrdinalIgnoreCase);
+                
+                // Check for invalid modifier combinations
+                if (modifiers.Contains("add") && modifiers.Contains("ifundefined"))
+                {
+                    task.AddWarning("Invalid modifier combination: 'add' and 'ifundefined' cannot be used together");
+                    // Leave as literal text
+                    startIndex = setEndIndex + 10; // length of "<ppp:/set>"
+                    continue;
+                }
+                
+                string replacement;
+                
+                // Generate appropriate replacement based on modifiers
+                if (modifiers.Contains("ifundefined"))
+                {
+                    if (modifiers.Contains("evaluate"))
+                    {
+                        // Immediate ifundefined: <wcmatch:<wccase[length(varname) == 0]:<setvar[varname,false]:value><setmacro[varname,false]:<var:varname>>>>
+                        replacement = $"<wcmatch:<wccase[length({varName}) == 0]:<setvar[{varName},false]:{value}><setmacro[{varName},false]:<var:{varName}>>>>";
+                    }
+                    else
+                    {
+                        // Deferred ifundefined: <wcmatch:<wccase[length(varname) == 0]:<setmacro[varname,false]:value>>>
+                        replacement = $"<wcmatch:<wccase[length({varName}) == 0]:<setmacro[{varName},false]:{value}>>>";
+                    }
+                }
+                else if (modifiers.Contains("add"))
+                {
+                    if (modifiers.Contains("evaluate"))
+                    {
+                        // Immediate add: <setvar[varname,false]:<macro:varname>, value><setmacro[varname,false]:<var:varname>>
+                        replacement = $"<setvar[{varName},false]:<macro:{varName}>, {value}><setmacro[{varName},false]:<var:{varName}>>";
+                    }
+                    else
+                    {
+                        // Deferred add: <wcaddmacro[varname]:, value>
+                        replacement = $"<wcaddmacro[{varName}]:, {value}>";
+                    }
+                }
+                else
+                {
+                    if (modifiers.Contains("evaluate"))
+                    {
+                        // Immediate assignment: <setvar[varname,false]:value><setmacro[varname,false]:<var:varname>>
+                        replacement = $"<setvar[{varName},false]:{value}><setmacro[{varName},false]:<var:{varName}>>";
+                    }
+                    else
+                    {
+                        // Deferred assignment: <setmacro[varname,false]:value>
+                        replacement = $"<setmacro[{varName},false]:{value}>";
+                    }
+                }
+                
+                // Replace the entire set command with the new format
+                int totalLength = setEndIndex - setStartIndex + 10; // +10 for "<ppp:/set>"
+                result.Remove(setStartIndex, totalLength);
+                result.Insert(setStartIndex, replacement);
+                
+                // Update the start index for the next search
+                startIndex = setStartIndex + replacement.Length;
             }
             
             return result.ToString();
@@ -1035,13 +1256,13 @@ namespace Spoomples.Extensions.WildcardImporter
                     quantifierSpec = $"[{numberPart},]";
                 }
                 
-                // Special case: Single wildcard with quantifier should become <wildcard[quantifier]:name>
-                // Example: {2$$__flavours__} should become <wildcard[2,]:flavours> not <random[2,]:<wildcard:flavours>>
+                // Special case: Single wildcard with quantifier should become <wcwildcard[quantifier]:name>
+                // Example: {2$$__flavours__} should become <wcwildcard[2,]:flavours> not <random[2,]:<wcwildcard:flavours>>
                 Logs.Debug($"WildcardProcessor: Checking single wildcard for optionsPart='{optionsPart}'");
                 if (IsSingleWildcard(optionsPart))
                 {
                     string wildcardName = ExtractWildcardName(optionsPart);
-                    string result = $"<wildcard{quantifierSpec}:{wildcardName}>";
+                    string result = $"<wcwildcard{quantifierSpec}:{wildcardName}>";
                     Logs.Debug($"WildcardProcessor: Single wildcard detected, returning '{result}'");
                     return result;
                 }
@@ -1097,9 +1318,9 @@ namespace Spoomples.Extensions.WildcardImporter
             // Standard non-glob reference
             if (string.IsNullOrEmpty(quantityString))
             {
-                return $"<wildcard:{task.Prefix + reference}>";
+                return $"<wcwildcard:{task.Prefix + reference}>";
             }
-            return $"<wildcard[{quantityString}]:{task.Prefix + reference}>";
+            return $"<wcwildcard[{quantityString}]:{task.Prefix + reference}>";
         }
         
         private string ProcessGlobWildcardRef(string quantityString, string reference, string taskId)
@@ -1113,30 +1334,30 @@ namespace Spoomples.Extensions.WildcardImporter
             {
                 task.AddWarning($"No matches found for glob pattern: {reference}");
                 // Return the original reference in a way that shows it's a failed glob
-                return $"<wildcard:{task.Prefix + reference}><comment:no glob matches>";
+                return $"<wcwildcard:{task.Prefix + reference}><comment:no glob matches>";
             }
             
-            // Convert to a <random> tag with multiple <wildcard> entries
+            // Convert to a <wcrandom> tag with multiple <wcwildcard> entries
             if (matchingPaths.Count == 1)
             {
                 // Only one match, no need for random
                 string path = matchingPaths.First();
                 if (string.IsNullOrEmpty(quantityString))
                 {
-                    return $"<wildcard:{task.Prefix + path}>";
+                    return $"<wcwildcard:{task.Prefix + path}>";
                 }
-                return $"<wildcard[{quantityString},]:{task.Prefix + path}>";
+                return $"<wcwildcard[{quantityString},]:{task.Prefix + path}>";
             }
             
-            // Build a <random> tag with all matches
+            // Build a <wcrandom> tag with all matches
             var quantitySpec = string.IsNullOrEmpty(quantityString) ? "" : $"[{quantityString},]";
             StringBuilder result = new StringBuilder();
-            result.Append($"<random{quantitySpec}:");
+            result.Append($"<wcrandom{quantitySpec}:");
             
             for (int i = 0; i < matchingPaths.Count; i++)
             {
                 string path = matchingPaths[i];
-                result.Append($"<wildcard:{task.Prefix + path}>");
+                result.Append($"<wcwildcard:{task.Prefix + path}>");
                 if (i < matchingPaths.Count - 1)
                 {
                     result.Append("|");
@@ -1203,27 +1424,6 @@ namespace Spoomples.Extensions.WildcardImporter
         {
             string[] options = optionsPart.Split('|');
             
-            // Check if we have weighted options
-            bool hasWeightedOptions = false;
-            foreach (string option in options)
-            {
-                if (option.Contains("::") && option.IndexOf("::", StringComparison.Ordinal) > 0)
-                {
-                    string weightPart = option.Substring(0, option.IndexOf("::", StringComparison.Ordinal));
-                    if (double.TryParse(weightPart, out _))
-                    {
-                        hasWeightedOptions = true;
-                        break;
-                    }
-                }
-            }
-            
-            if (hasWeightedOptions)
-            {
-                var weightedOptions = ProcessWeightedOptions(options);
-                return $"<random{quantifierSpec}:{string.Join("|", weightedOptions)}>";
-            }
-            
             // Handle empty options
             for (int i = 0; i < options.Length; i++)
             {
@@ -1243,106 +1443,11 @@ namespace Spoomples.Extensions.WildcardImporter
                 return "";
             }
 
-            return $"<random{quantifierSpec}:{string.Join("|", options)}>";
+            // Use wcrandom which supports native weighted options (weight::option syntax)
+            // No need to expand weighted options - wcrandom handles them directly
+            return $"<wcrandom{quantifierSpec}:{string.Join("|", options)}>";
         }
         
-        private string[] ProcessWeightedOptions(string[] options)
-        {
-            var result = new List<string>();
-            var weights = new List<double>();
-            var unweightedOptions = new List<string>();
-            
-            // Extract weights and options
-            foreach (var option in options)
-            {
-                if (option.Contains("::") && option.IndexOf("::", StringComparison.Ordinal) > 0)
-                {
-                    string weightPart = option.Substring(0, option.IndexOf("::", StringComparison.Ordinal));
-                    string valuePart = option.Substring(option.IndexOf("::", StringComparison.Ordinal) + 2);
-                    
-                    if (double.TryParse(weightPart, out double weight))
-                    {
-                        weights.Add(weight);
-                        unweightedOptions.Add(string.IsNullOrEmpty(valuePart) ? "<comment:empty>" : valuePart);
-                    }
-                    else
-                    {
-                        // If parsing fails, treat as unweighted
-                        weights.Add(1.0);
-                        unweightedOptions.Add(string.IsNullOrEmpty(option) ? "<comment:empty>" : option);
-                    }
-                }
-                else
-                {
-                    weights.Add(1.0);
-                    unweightedOptions.Add(string.IsNullOrEmpty(option) ? "<comment:empty>" : option);
-                }
-            }
-            
-            // If all weights are 1.0, no need for special processing
-            if (weights.All(w => Math.Abs(w - 1.0) < 0.001))
-            {
-                return unweightedOptions.ToArray();
-            }
-            
-            // Calculate multiplier to get integer weights
-            double multiplier = 1.0;
-            foreach (var weight in weights)
-            {
-                var fractionalPart = weight - Math.Floor(weight);
-                if (fractionalPart > 0)
-                {
-                    // Find multiplier that makes all weights integers
-                    int precision = (int)Math.Pow(10, fractionalPart.ToString().TrimStart('0', '.').Length);
-                    multiplier = Math.Max(multiplier, precision);
-                }
-            }
-            
-            // Convert to integer weights
-            List<int> intWeights = weights.Select(w => (int)Math.Round(w * multiplier)).ToList();
-            
-            // Find GCD for all weights
-            int gcd = intWeights.Count > 0 ? intWeights[0] : 1;
-            for (int i = 1; i < intWeights.Count; i++)
-            {
-                gcd = GCD(gcd, intWeights[i]);
-            }
-            
-            // Calculate normalized weights
-            var normalizedWeights = intWeights.Select(w => w / gcd).ToList();
-            
-            // Create duplicated options according to weights
-            for (int i = 0; i < unweightedOptions.Count; i++)
-            {
-                for (int j = 0; j < normalizedWeights[i]; j++)
-                {
-                    result.Add(unweightedOptions[i]);
-                }
-            }
-            
-            return result.ToArray();
-        }
-        
-        private int GCD(int a, int b)
-        {
-            while (b != 0)
-            {
-                int temp = b;
-                b = a % b;
-                a = temp;
-            }
-            return a;
-        }
-        
-        private int GCD(int a, int b, params int[] numbers)
-        {
-            int result = GCD(a, b);
-            foreach (int number in numbers)
-            {
-                result = GCD(result, number);
-            }
-            return result;
-        }
 
         /// <summary>
         /// Finds the index of a custom separator $$ that is not inside nested structures.
@@ -1389,8 +1494,8 @@ namespace Spoomples.Extensions.WildcardImporter
             
             string trimmed = optionsPart.Trim();
             
-            // Must start with <wildcard: and end with >
-            if (!trimmed.StartsWith("<wildcard:") || !trimmed.EndsWith(">"))
+            // Must start with <wcwildcard: and end with >
+            if (!trimmed.StartsWith("<wcwildcard:") || !trimmed.EndsWith(">"))
             {
                 return false;
             }
@@ -1425,16 +1530,16 @@ namespace Spoomples.Extensions.WildcardImporter
         }
 
         /// <summary>
-        /// Extracts the wildcard name from a processed wildcard pattern (removes the <wildcard: and > delimiters).
+        /// Extracts the wildcard name from a processed wildcard pattern (removes the <wcwildcard: and > delimiters).
         /// </summary>
-        /// <param name="wildcardOption">The wildcard option like <wildcard:flavours> or <wildcard:<random[1,]:cat|dog>s>.</param>
+        /// <param name="wildcardOption">The wildcard option like <wcwildcard:flavours> or <wcwildcard:<random[1,]:cat|dog>s>.</param>
         /// <returns>The wildcard name like flavours or <random[1,]:cat|dog>s.</returns>
         private string ExtractWildcardName(string wildcardOption)
         {
             string trimmed = wildcardOption.Trim();
-            if (trimmed.StartsWith("<wildcard:") && trimmed.EndsWith(">") && trimmed.Length > 11)
+            if (trimmed.StartsWith("<wcwildcard:") && trimmed.EndsWith(">") && trimmed.Length > 13)
             {
-                return trimmed.Substring(10, trimmed.Length - 11);
+                return trimmed.Substring(12, trimmed.Length - 13);
             }
             return wildcardOption; // Fallback, should not happen if IsSingleWildcard returned true
         }
@@ -1528,6 +1633,672 @@ namespace Spoomples.Extensions.WildcardImporter
 
             return newPath;
         }
+
+        /// <summary>
+        /// Processes long-form echo commands in the input line.
+        /// Supports: <ppp:echo varname> and <ppp:echo varname>default<ppp:/echo>
+        /// Note: Short-form ${varname:default} syntax is handled by ProcessVariables method
+        /// </summary>
+        /// <param name="line">The input line to process.</param>
+        /// <param name="task">The current processing task.</param>
+        /// <returns>The processed line with echo commands converted to appropriate directives.</returns>
+        private string ProcessEchoCommands(string line, ProcessingTask task)
+        {
+            // Process long-form echo commands: <ppp:echo varname> and <ppp:echo varname>default<ppp:/echo>
+            return ProcessLongFormEchoCommands(line, task);
+        }
+
+        /// <summary>
+        /// Processes long-form echo commands: <ppp:echo varname> and <ppp:echo varname>default<ppp:/echo>
+        /// </summary>
+        private string ProcessLongFormEchoCommands(string line, ProcessingTask task)
+        {
+            // First process <ppp:echo varname>default<ppp:/echo> (with default)
+            // Use a more careful pattern that handles nested content properly
+            var echoWithDefaultPattern = @"<ppp:echo\s+([^>\s]+?)\s*>([\s\S]*?)<ppp:/echo>";
+            line = Regex.Replace(line, echoWithDefaultPattern, match =>
+            {
+                string varName = match.Groups[1].Value.Trim();
+                string defaultValue = match.Groups[2].Value;
+                
+                // Check for malformed cases (empty variable name)
+                if (string.IsNullOrWhiteSpace(varName))
+                {
+                    return match.Value; // Return original malformed syntax
+                }
+                
+                // If default is empty, just return <macro:varname>
+                if (string.IsNullOrEmpty(defaultValue))
+                {
+                    return $"<macro:{varName}>";
+                }
+                
+                // Process the default value recursively to handle nested syntax
+                string processedDefault = ProcessWildcardLine(defaultValue, task.Id);
+                
+                // Return wcmatch with condition for empty variable and else clause
+                return $"<wcmatch:<wccase[length({varName}) == 0]:{processedDefault}><wccase:<macro:{varName}>>>";
+            }, RegexOptions.IgnoreCase);
+            
+            // Then process <ppp:echo varname> (without default) - only if not already processed
+            var echoWithoutDefaultPattern = @"<ppp:echo\s+([^>\s]+?)\s*>(?!.*<ppp:/echo>)";
+            line = Regex.Replace(line, echoWithoutDefaultPattern, match =>
+            {
+                string varName = match.Groups[1].Value.Trim();
+                
+                // Check for malformed cases (empty variable name)
+                if (string.IsNullOrWhiteSpace(varName))
+                {
+                    return match.Value; // Return original malformed syntax
+                }
+                
+                return $"<macro:{varName}>";
+            }, RegexOptions.IgnoreCase);
+            
+            return line;
+        }
+
+        /// <summary>
+        /// Processes if commands: <ppp:if condition>content<ppp:elif condition>content<ppp:else>content<ppp:/if>
+        /// Converts them to wcmatch/wccase directives with proper expression syntax.
+        /// </summary>
+        /// <param name="line">The input line to process.</param>
+        /// <param name="task">The current processing task.</param>
+        /// <returns>The processed line with if commands converted to appropriate directives.</returns>
+        private string ProcessIfCommands(string line, ProcessingTask task)
+        {
+            // Use manual parsing to handle nested if statements properly
+            string result = line;
+            int startIndex = 0;
+            
+            while (true)
+            {
+                // Find the next if statement
+                int ifStart = result.IndexOf("<ppp:if ", startIndex, StringComparison.OrdinalIgnoreCase);
+                if (ifStart == -1)
+                    break;
+                    
+                // Find the end of the opening tag
+                int tagEnd = result.IndexOf('>', ifStart);
+                if (tagEnd == -1)
+                    break;
+                    
+                // Extract the condition
+                string condition = result.Substring(ifStart + 8, tagEnd - ifStart - 8).Trim();
+                
+                // Find the matching closing tag using manual counting
+                int contentStart = tagEnd + 1;
+                int depth = 1;
+                int pos = contentStart;
+                
+                while (pos < result.Length && depth > 0)
+                {
+                    int nextIf = result.IndexOf("<ppp:if ", pos, StringComparison.OrdinalIgnoreCase);
+                    int nextEndIf = result.IndexOf("<ppp:/if>", pos, StringComparison.OrdinalIgnoreCase);
+                    
+                    if (nextEndIf == -1)
+                        break; // Malformed - no closing tag
+                        
+                    if (nextIf != -1 && nextIf < nextEndIf)
+                    {
+                        // Found nested if before closing tag
+                        depth++;
+                        pos = nextIf + 8;
+                    }
+                    else
+                    {
+                        // Found closing tag
+                        depth--;
+                        if (depth == 0)
+                        {
+                            // This is our matching closing tag
+                            string content = result.Substring(contentStart, nextEndIf - contentStart);
+                            string fullMatch = result.Substring(ifStart, nextEndIf + 9 - ifStart);
+                            
+                            try
+                            {
+                                string replacement = ProcessIfStructure(condition, content, task, fullMatch);
+                                result = result.Substring(0, ifStart) + replacement + result.Substring(nextEndIf + 9);
+                                startIndex = ifStart + replacement.Length;
+                                break;
+                            }
+                            catch (Exception ex)
+                            {
+                                task.AddWarning($"Error processing if command: {ex.Message}");
+                                startIndex = nextEndIf + 9;
+                                break;
+                            }
+                        }
+                        else
+                        {
+                            pos = nextEndIf + 9;
+                        }
+                    }
+                }
+                
+                if (depth > 0)
+                {
+                    // Malformed - no matching closing tag found
+                    task.AddWarning("Malformed if command: no matching closing tag");
+                    break;
+                }
+            }
+            
+            return result;
+        }
+
+        /// <summary>
+        /// Processes the full if/elif/else structure and converts it to wcmatch/wccase syntax.
+        /// </summary>
+        private string ProcessIfStructure(string initialCondition, string content, ProcessingTask task, string originalMatch)
+        {
+            var cases = new List<string>();
+            
+            // Parse the content to extract elif and else clauses
+            var parts = ParseIfContent(content);
+            
+            // Add the initial if condition
+            string processedCondition = ProcessCondition(initialCondition, task);
+            if (processedCondition == null)
+            {
+                // Return original text if condition parsing failed
+                return originalMatch;
+            }
+            
+            string processedContent = parts.IfContent;
+            if (string.IsNullOrEmpty(processedContent))
+            {
+                processedContent = "<comment:empty>";
+            }
+            else
+            {
+                // Recursively process content to handle nested structures
+                processedContent = ProcessWildcardLine(processedContent, task.Id);
+            }
+            
+            cases.Add($"<wccase[{processedCondition}]:{processedContent}>");
+            
+            // Add elif clauses
+            foreach (var elifPart in parts.ElifParts)
+            {
+                string elifCondition = ProcessCondition(elifPart.Condition, task);
+                if (elifCondition != null)
+                {
+                    string elifContent = string.IsNullOrEmpty(elifPart.Content) ? "<comment:empty>" : ProcessWildcardLine(elifPart.Content, task.Id);
+                    cases.Add($"<wccase[{elifCondition}]:{elifContent}>");
+                }
+            }
+            
+            // Add else clause if present
+            if (parts.ElseContent != null)
+            {
+                string elseContent = string.IsNullOrEmpty(parts.ElseContent) ? "<comment:empty>" : ProcessWildcardLine(parts.ElseContent, task.Id);
+                cases.Add($"<wccase:{elseContent}>");
+            }
+            
+            return $"<wcmatch:{string.Join("", cases)}>";
+        }
+
+        /// <summary>
+        /// Parses the content of an if block to extract elif and else clauses.
+        /// </summary>
+        private IfParts ParseIfContent(string content)
+        {
+            var result = new IfParts();
+            var elifParts = new List<ElifPart>();
+            
+            // Find elif and else tags
+            var elifPattern = @"<ppp:elif\s+([^>]+?)>";
+            var elsePattern = @"<ppp:else>";
+            
+            var elifMatches = Regex.Matches(content, elifPattern, RegexOptions.IgnoreCase);
+            var elseMatch = Regex.Match(content, elsePattern, RegexOptions.IgnoreCase);
+            
+            int currentIndex = 0;
+            
+            // Extract content before first elif or else
+            int nextIndex = content.Length;
+            if (elifMatches.Count > 0)
+                nextIndex = Math.Min(nextIndex, elifMatches[0].Index);
+            if (elseMatch.Success)
+                nextIndex = Math.Min(nextIndex, elseMatch.Index);
+                
+            result.IfContent = content.Substring(currentIndex, nextIndex - currentIndex);
+            currentIndex = nextIndex;
+            
+            // Process elif clauses
+            for (int i = 0; i < elifMatches.Count; i++)
+            {
+                var elifMatch = elifMatches[i];
+                string condition = elifMatch.Groups[1].Value.Trim();
+                
+                // Find start of content (after the elif tag)
+                int contentStart = elifMatch.Index + elifMatch.Length;
+                
+                // Find end of content (before next elif or else)
+                int contentEnd = content.Length;
+                if (i + 1 < elifMatches.Count)
+                    contentEnd = Math.Min(contentEnd, elifMatches[i + 1].Index);
+                if (elseMatch.Success)
+                    contentEnd = Math.Min(contentEnd, elseMatch.Index);
+                
+                string elifContent = content.Substring(contentStart, contentEnd - contentStart);
+                elifParts.Add(new ElifPart { Condition = condition, Content = elifContent });
+            }
+            
+            result.ElifParts = elifParts;
+            
+            // Process else clause
+            if (elseMatch.Success)
+            {
+                int elseStart = elseMatch.Index + elseMatch.Length;
+                result.ElseContent = content.Substring(elseStart);
+            }
+            
+            return result;
+        }
+
+        /// <summary>
+        /// Processes a condition expression and converts it to wccase syntax.
+        /// </summary>
+        private string ProcessCondition(string condition, ProcessingTask task)
+        {
+            condition = condition.Trim();
+            
+            if (string.IsNullOrWhiteSpace(condition))
+                return null;
+            
+            // Check for simple variable truthiness (no operators)
+            if (!Regex.IsMatch(condition, @"\s+(eq|ne|gt|lt|ge|le|contains|in|not)\s+", RegexOptions.IgnoreCase))
+            {
+                return condition; // Simple variable check
+            }
+            
+            // Parse condition with operators (allow hyphens, underscores in variable names)
+            var conditionMatch = Regex.Match(condition, 
+                @"^\s*([\w\-]+)\s+(not\s+)?(eq|ne|gt|lt|ge|le|contains|in)\s+(.+?)\s*$", 
+                RegexOptions.IgnoreCase);
+                
+            if (!conditionMatch.Success)
+            {
+                task.AddWarning($"Could not parse condition: {condition}");
+                return null;
+            }
+            
+            string variable = conditionMatch.Groups[1].Value;
+            bool isNot = conditionMatch.Groups[2].Success;
+            string operation = conditionMatch.Groups[3].Value.ToLowerInvariant();
+            string value = conditionMatch.Groups[4].Value.Trim();
+            
+            // Validate operation
+            var validOperations = new[] { "eq", "ne", "gt", "lt", "ge", "le", "contains", "in" };
+            if (!validOperations.Contains(operation))
+            {
+                task.AddWarning($"Could not parse condition: {condition}");
+                return null;
+            }
+            
+            // Validate parentheses matching for list operations
+            if (value.Contains("(") || value.Contains(")"))
+            {
+                int openCount = value.Count(c => c == '(');
+                int closeCount = value.Count(c => c == ')');
+                if (openCount != closeCount)
+                {
+                    task.AddWarning($"Could not parse condition: {condition}");
+                    return null;
+                }
+            }
+            
+            // Convert operation to wccase syntax
+            string wcaseExpression = ConvertOperationToWcaseExpression(variable, operation, value, isNot, task);
+            
+            return wcaseExpression;
+        }
+
+        /// <summary>
+        /// Converts an operation to wccase expression syntax.
+        /// </summary>
+        private string ConvertOperationToWcaseExpression(string variable, string operation, string value, bool isNot, ProcessingTask task)
+        {
+            
+            // Check if value is a list (parentheses)
+            if (value.StartsWith("(") && value.EndsWith(")"))
+            {
+                string listContent = value.Substring(1, value.Length - 2);
+                var values = ParseValueList(listContent);
+                
+                if (values.Count == 1)
+                {
+                    // Single value in parentheses, treat as single value
+                    return ConvertSingleValueOperation(variable, operation, values[0], isNot);
+                }
+                else
+                {
+                    // Multiple values, convert to OR/AND chain
+                    return ConvertListOperation(variable, operation, values, isNot);
+                }
+            }
+            else
+            {
+                // Single value operation
+                return ConvertSingleValueOperation(variable, operation, value, isNot);
+            }
+        }
+
+        /// <summary>
+        /// Converts a single value operation to wccase syntax.
+        /// </summary>
+        private string ConvertSingleValueOperation(string variable, string operation, string value, bool isNot)
+        {
+            switch (operation.ToLowerInvariant())
+            {
+                case "eq":
+                    return isNot ? $"{variable} ~= {value}" : $"{variable} == {value}";
+                case "ne":
+                    return isNot ? $"{variable} == {value}" : $"{variable} ~= {value}";
+                case "gt":
+                    return isNot ? $"~({variable} > {value})" : $"{variable} > {value}";
+                case "lt":
+                    return isNot ? $"~({variable} < {value})" : $"{variable} < {value}";
+                case "ge":
+                    return isNot ? $"~({variable} >= {value})" : $"{variable} >= {value}";
+                case "le":
+                    return isNot ? $"~({variable} <= {value})" : $"{variable} <= {value}";
+                case "contains":
+                    return isNot ? $"~contains({variable}, {value})" : $"contains({variable}, {value})";
+                case "in":
+                    return isNot ? $"~({variable} == {value})" : $"{variable} == {value}";
+                default:
+                    // Return as-is for unknown operations
+                    return $"{variable} {operation} {value}";
+            }
+        }
+
+        /// <summary>
+        /// Converts a list operation to wccase syntax with OR/AND chains.
+        /// </summary>
+        private string ConvertListOperation(string variable, string operation, List<string> values, bool isNot)
+        {
+            var expressions = new List<string>();
+            
+            foreach (string value in values)
+            {
+                switch (operation.ToLowerInvariant())
+                {
+                    case "contains":
+                        expressions.Add($"contains({variable}, {value})");
+                        break;
+                    case "in":
+                        expressions.Add($"{variable} == {value}");
+                        break;
+                    default:
+                        throw new InvalidOperationException($"Operation '{operation}' not supported with lists");
+                }
+            }
+            
+            string joinOperator;
+            if (isNot)
+            {
+                // For NOT operations, we need AND (De Morgan's law: not (A or B) = (not A) and (not B))
+                if (operation.ToLowerInvariant() == "contains")
+                {
+                    expressions = expressions.Select(expr => $"~{expr}").ToList();
+                    joinOperator = " && ";
+                }
+                else // in
+                {
+                    expressions = expressions.Select(expr => expr.Replace("==", "~=")).ToList();
+                    joinOperator = " && ";
+                }
+            }
+            else
+            {
+                // For normal operations, we use OR
+                joinOperator = " || ";
+            }
+            
+            return string.Join(joinOperator, expressions);
+        }
+
+        /// <summary>
+        /// Parses a comma-separated list of values, preserving quotes and handling escaping.
+        /// </summary>
+        private List<string> ParseValueList(string listContent)
+        {
+            var values = new List<string>();
+            var currentValue = new StringBuilder();
+            bool inQuotes = false;
+            char quoteChar = '"';
+            
+            for (int i = 0; i < listContent.Length; i++)
+            {
+                char c = listContent[i];
+                
+                if (!inQuotes && (c == '"' || c == '\''))
+                {
+                    inQuotes = true;
+                    quoteChar = c;
+                    currentValue.Append(c);
+                }
+                else if (inQuotes && c == quoteChar)
+                {
+                    inQuotes = false;
+                    currentValue.Append(c);
+                }
+                else if (!inQuotes && c == ',')
+                {
+                    values.Add(currentValue.ToString().Trim());
+                    currentValue.Clear();
+                }
+                else
+                {
+                    currentValue.Append(c);
+                }
+            }
+            
+            // Add the last value
+            if (currentValue.Length > 0)
+            {
+                values.Add(currentValue.ToString().Trim());
+            }
+            
+            return values;
+        }
+
+        /// <summary>
+        /// Helper class to hold parsed if structure parts.
+        /// </summary>
+        private class IfParts
+        {
+            public string IfContent { get; set; }
+            public List<ElifPart> ElifParts { get; set; } = new List<ElifPart>();
+            public string ElseContent { get; set; }
+        }
+
+        /// <summary>
+        /// Helper class to hold elif clause information.
+        /// </summary>
+        private class ElifPart
+        {
+            public string Condition { get; set; }
+            public string Content { get; set; }
+        }
+
+        #region STN Command Processing
+
+        /// <summary>
+        /// Processes STN (Send To Negative) commands and converts them to wcnegative directives.
+        /// Handles position arguments (s/e/pN) and insertion point markers (iN).
+        /// </summary>
+        /// <param name="line">The input line to process.</param>
+        /// <param name="task">The current processing task.</param>
+        /// <returns>The processed line with STN commands converted to wcnegative directives.</returns>
+        private string ProcessStnCommands(string line, ProcessingTask task)
+        {
+            string result = line;
+            
+            // First, handle insertion point markers (iN) - remove them with warnings
+            result = ProcessStnInsertionMarkers(result, task);
+            
+            // Then process STN commands with manual parsing to handle nested structures
+            int startIndex = 0;
+            
+            while (true)
+            {
+                // Find the next STN command
+                int stnStart = result.IndexOf("<ppp:stn", startIndex, StringComparison.OrdinalIgnoreCase);
+                if (stnStart == -1)
+                    break;
+                    
+                // Find the end of the opening tag
+                int tagEnd = result.IndexOf('>', stnStart);
+                if (tagEnd == -1)
+                    break;
+                    
+                // Extract the position argument (if any)
+                string positionArg = "";
+                int spaceIndex = result.IndexOf(' ', stnStart);
+                if (spaceIndex != -1 && spaceIndex < tagEnd)
+                {
+                    positionArg = result.Substring(spaceIndex + 1, tagEnd - spaceIndex - 1).Trim();
+                }
+                
+                // Find the matching closing tag using manual counting
+                int contentStart = tagEnd + 1;
+                int depth = 1;
+                int pos = contentStart;
+                
+                while (pos < result.Length && depth > 0)
+                {
+                    int nextStn = result.IndexOf("<ppp:stn", pos, StringComparison.OrdinalIgnoreCase);
+                    int nextEndStn = result.IndexOf("<ppp:/stn>", pos, StringComparison.OrdinalIgnoreCase);
+                    
+                    if (nextEndStn == -1)
+                        break; // Malformed - no closing tag
+                        
+                    if (nextStn != -1 && nextStn < nextEndStn)
+                    {
+                        // Found nested STN before closing tag
+                        depth++;
+                        pos = nextStn + 8;
+                    }
+                    else
+                    {
+                        // Found closing tag
+                        depth--;
+                        if (depth == 0)
+                        {
+                            // This is our matching closing tag
+                            string content = result.Substring(contentStart, nextEndStn - contentStart);
+                            string fullMatch = result.Substring(stnStart, nextEndStn + 10 - stnStart);
+                            
+                            try
+                            {
+                                string replacement = ProcessStnStructure(positionArg, content, task);
+                                result = result.Substring(0, stnStart) + replacement + result.Substring(nextEndStn + 10);
+                                startIndex = stnStart + replacement.Length;
+                                break;
+                            }
+                            catch (Exception ex)
+                            {
+                                task.AddWarning($"Error processing STN command: {ex.Message}");
+                                startIndex = nextEndStn + 10;
+                                break;
+                            }
+                        }
+                        else
+                        {
+                            pos = nextEndStn + 10;
+                        }
+                    }
+                }
+                
+                if (depth > 0)
+                {
+                    // Malformed - no matching closing tag found
+                    task.AddWarning("Malformed STN command: no matching closing tag");
+                    break;
+                }
+            }
+            
+            return result;
+        }
+
+        /// <summary>
+        /// Processes STN insertion point markers (iN) and removes them with warnings.
+        /// </summary>
+        private string ProcessStnInsertionMarkers(string line, ProcessingTask task)
+        {
+            // Pattern to match insertion point markers like <ppp:stn i0>, <ppp:stn i1>, etc.
+            var regex = new Regex(@"<ppp:stn\s+i\d+\s*>", RegexOptions.IgnoreCase);
+            
+            return regex.Replace(line, match =>
+            {
+                task.AddWarning($"STN insertion point marker '{match.Value}' is not supported and has been removed");
+                return "";
+            });
+        }
+
+        /// <summary>
+        /// Processes a single STN structure and converts it to wcnegative directive.
+        /// </summary>
+        private string ProcessStnStructure(string positionArg, string content, ProcessingTask task)
+        {
+            // Recursively process the content to handle nested commands
+            string processedContent = ProcessWildcardLine(content, task.Id);
+            
+            // Determine the position mode and separator
+            bool isPrepend = true; // Default is start (prepend)
+            string separator = ", "; // Default separator for prepend (suffix)
+            
+            if (!string.IsNullOrEmpty(positionArg))
+            {
+                string pos = positionArg.ToLowerInvariant();
+                
+                if (pos == "e" || pos == "end")
+                {
+                    // End position - use append mode
+                    isPrepend = false;
+                    separator = ", "; // For append, we use prefix
+                }
+                else if (pos == "s" || pos == "start")
+                {
+                    // Start position - use prepend mode (already set)
+                    isPrepend = true;
+                    separator = ", ";
+                }
+                else if (pos.StartsWith("p") && pos.Length > 1 && char.IsDigit(pos[1]))
+                {
+                    // Insertion point (pN) - fallback to append with warning
+                    task.AddWarning($"STN insertion point '{positionArg}' is not supported by wcnegative, falling back to append mode");
+                    isPrepend = false;
+                    separator = ", ";
+                }
+                else if (pos != "")
+                {
+                    // Invalid position - default to start with warning
+                    task.AddWarning($"Invalid STN position '{positionArg}', defaulting to start position");
+                    isPrepend = true;
+                    separator = ", ";
+                }
+            }
+            
+            // Build the wcnegative directive
+            if (isPrepend)
+            {
+                // Prepend mode: content gets comma suffix
+                return $"<wcnegative[prepend]:{processedContent}{separator}>";
+            }
+            else
+            {
+                // Append mode: content gets comma prefix
+                return $"<wcnegative:{separator}{processedContent}>";
+            }
+        }
+
+        #endregion
+
     }
 
     public class ProcessingTask
