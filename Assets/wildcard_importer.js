@@ -801,3 +801,14 @@ promptTabComplete.registerPrefix('wccase[var_name == "value"]', 'Conditional cas
         '\nSupports expressions like: myvar == "value", contains(myvar, "text"), length(myvar) > 5'
     ];
 });
+
+
+promptTabComplete.registerPrefix('wcwildcard', 'Select a random line from a wildcard file (presaved list of options) (works same as "wcrandom" but for wildcards)', (prefix) => {
+    let prefixLow = prefix.toLowerCase();
+    return promptTabComplete.getOrderedMatches(wildcardHelpers.allWildcards, prefixLow);
+});
+
+promptTabComplete.registerPrefix('wcwildcard[2-4]', 'Select multiple random lines from a wildcard file (presaved list of options) (works same as "wcrandom" but for wildcards)', (prefix) => {
+    let prefixLow = prefix.toLowerCase();
+    return promptTabComplete.getOrderedMatches(wildcardHelpers.allWildcards, prefixLow);
+});

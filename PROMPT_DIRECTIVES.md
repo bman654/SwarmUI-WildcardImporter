@@ -41,6 +41,43 @@ Like `<random>`, the options in `<wcrandom>` can be separated by `,` or `|` or `
 - `<wcrandom[1-3,]:apple|banana|cherry>` → might return `"apple, banana"`
 - `<wcrandom:0.1::legendary|1::rare|10::common>` → heavily favors "common"
 
+## Enhanced Wildcard Selection
+
+### `<wcwildcard>`
+
+An enhanced version of SwarmUI's built-in `<wildcard>` directive with support for custom separators and advanced count/range syntax.
+
+**Basic Syntax:**
+```
+<wcwildcard:cardname>
+```
+
+**With Count and Custom Separators:**
+```
+<wcwildcard[2]:cardname>
+<wcwildcard[1-3]:cardname>
+<wcwildcard[2,]:cardname> // separator is ", "
+<wcwildcard[1-3, and ]:cardname> // separator is " and "
+```
+
+**With Exclusions:**
+```
+<wcwildcard:cardname,not=option1|option2>
+<wcwildcard[2]:cardname,not=unwanted1|unwanted2>
+```
+
+**Features:**
+- **Custom Separators**: Specify separator after count (default is `' '`)
+- **Multiple Selections**: Use `[count]` or `[min-max]` to select multiple options
+- **Option Exclusion**: Use `,not=option1|option2` to exclude specific wildcard options
+- **No Repetition**: Avoids repeating the same option unless count exceeds available options
+
+**Examples:**
+- `<wcwildcard[2]:animals>` → might return `"cat dog"`
+- `<wcwildcard[1-3,]:colors>` → might return `"red, blue, green"`
+- `<wcwildcard[2, and ]:styles>` → might return `"realistic and detailed"`
+- `<wcwildcard:characters,not=villain|monster>` → excludes villain and monster options
+
 ## Negative Prompt Management
 
 ### `<wcnegative>`

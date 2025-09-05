@@ -73,6 +73,7 @@ namespace Spoomples.Extensions.WildcardImporter
             AddMacro();
             Match();
             EnhancedRandom();
+            EnhancedWildcard();
         }
 
         public static (int, string) InterpretPredataForRandom(string prefix, string preData, string data, T2IPromptHandling.PromptTagContext context)
@@ -192,7 +193,11 @@ namespace Spoomples.Extensions.WildcardImporter
                 for (int i = 0; i < count; i++)
                 {
                     string choice = set.TakeRandom(context);
-                    result += context.Parse(choice).Trim() + partSeparator;
+                    if (result != "")
+                    {
+                        result += partSeparator;
+                    }
+                    result += context.Parse(choice).Trim();
                     if (set.Choices.Count == 0)
                     {
                         set = new WeightedSet(rawVals);
@@ -340,6 +345,114 @@ namespace Spoomples.Extensions.WildcardImporter
                     return lengthOfThisCase.Substring(currentMatchLength.Length);
                 }
                 return "";
+            };
+        }
+
+        private static void EnhancedWildcard()
+        {
+            /*
+               Enhanced wildcard directive that uses the new InterpretPredataForRandom method
+               with support for custom separators:
+               <wcwildcard:cardname>
+               <wcwildcard[2]:cardname>
+               <wcwildcard[1-3]:cardname>
+               <wcwildcard[2,]:cardname> // separator is ", "
+               <wcwildcard[1-3, and ]:cardname> // separator is " and "
+               <wcwildcard:cardname,not=option1|option2> // exclude specific options
+             */
+            T2IPromptHandling.PromptTagProcessors["wcwildcard"] = (data, context) =>
+            {
+                data = context.Parse(data);
+                string[] dataParts = data.SplitFast(',', 1);
+                data = dataParts[0];
+                HashSet<string> exclude = [];
+                if (dataParts.Length > 1 && dataParts[1].StartsWithFast("not="))
+                {
+                    exclude.UnionWith(T2IPromptHandling.SplitSmart(dataParts[1].After('=')));
+                }
+                (int count, string partSeparator) = InterpretPredataForRandom("wcwildcard", context.PreData, data, context);
+                if (partSeparator is null)
+                {
+                    return null;
+                }
+                string card = T2IParamTypes.GetBestInList(data, WildcardsHelper.ListFiles);
+                if (card is null)
+                {
+                    context.TrackWarning($"Wildcard input '{data}' does not match any wildcard file and will be ignored.");
+                    return null;
+                }
+                if (data.Length < card.Length)
+                {
+                    Logs.Warning($"Wildcard input '{data}' is not a valid wildcard name, but appears to match '{card}', will use that instead.");
+                }
+                WildcardsHelper.Wildcard wildcard = WildcardsHelper.GetWildcard(card);
+                List<string> usedWildcards = context.Input.ExtraMeta.GetOrCreate("used_wildcards", () => new List<string>()) as List<string>;
+                usedWildcards.Add(card);
+                string[] options = wildcard.Options;
+                if (exclude.Count > 0)
+                {
+                    options = [.. options.Except(exclude)];
+                }
+                if (options.Length == 0)
+                {
+                    return "";
+                }
+                List<string> vals = [.. options];
+                string result = "";
+                for (int i = 0; i < count; i++)
+                {
+                    int index;
+                    if (context.Input.Get(T2IParamTypes.WildcardSeedBehavior, "Random") == "Index")
+                    {
+                        index = context.Input.GetWildcardSeed() % vals.Count;
+                    }
+                    else
+                    {
+                        index = context.Input.GetWildcardRandom().Next(vals.Count);
+                    }
+                    string choice = vals[index];
+                    if (result != "")
+                    {
+                        result += partSeparator;
+                    }
+                    result += context.Parse(choice).Trim();
+                    if (vals.Count == 1)
+                    {
+                        vals = [.. options];
+                    }
+                    else
+                    {
+                        vals.RemoveAt(index);
+                    }
+                }
+                return result.Trim();
+            };
+            T2IPromptHandling.PromptTagLengthEstimators["wcwildcard"] = (data, context) =>
+            {
+                string card = T2IParamTypes.GetBestInList(data.Before(','), WildcardsHelper.ListFiles);
+                if (card is null)
+                {
+                    return "";
+                }
+                WildcardsHelper.Wildcard wildcard = WildcardsHelper.GetWildcard(card);
+                if (wildcard.MaxLength is not null)
+                {
+                    return wildcard.MaxLength;
+                }
+                wildcard.MaxLength = ""; // Recursion protection.
+                int longest = 0;
+                string longestStr = "";
+                foreach (string val in wildcard.Options)
+                {
+                    string interp = T2IPromptHandling.ProcessPromptLikeForLength(val);
+                    if (interp.Length > longest)
+                    {
+                        longest = interp.Length;
+                        longestStr = interp;
+                    }
+                }
+                wildcard.MaxLength = longestStr;
+                return longestStr;
             };
         }
     }
