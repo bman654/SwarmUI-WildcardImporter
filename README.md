@@ -10,7 +10,7 @@ This extension for [SwarmUI](https://github.com/mcmonkeyprojects/SwarmUI) adds t
 ## Wildcard Importer
 
 It can automatically convert the collections from
-[SD Dynamic Prompt format](https://github.com/adieyal/sd-dynamic-prompts/blob/main/docs/SYNTAX.md#wildcards)
+[SD Dynamic Prompt format](https://github.com/adieyal/sd-dynamic-prompts/blob/main/docs/SYNTAX.md#wildcards) and most of [Prompt Postprocessor](https://github.com/acorderob/sd-webui-prompt-postprocessor/blob/main/docs/SYNTAX.md)
 format into SwarmUI's wildcard prompt format.
 
 # Usage Instructions

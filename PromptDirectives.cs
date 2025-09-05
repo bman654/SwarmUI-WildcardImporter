@@ -112,10 +112,10 @@ namespace Spoomples.Extensions.WildcardImporter
                     string valuePart = rawString.Substring(colonIndex + 2);
 
                     // Try to parse the weight part as a positive number
-                    if (double.TryParse(weightPart, out double parsedWeight) && parsedWeight > 0)
+                    if (double.TryParse(weightPart, out double parsedWeight))
                     {
                         Value = valuePart;
-                        Weight = parsedWeight;
+                        Weight = Math.Max(0, parsedWeight);
                         return;
                     }
                 }
@@ -124,7 +124,7 @@ namespace Spoomples.Extensions.WildcardImporter
 
         record WeightedSet(List<WeightedChoice> Choices)
         {
-            double TotalWeight { get; set; }
+            public double TotalWeight { get; set; }
 
             public WeightedSet(string[] rawVals) : this(new List<WeightedChoice>(rawVals.Length))
             {
@@ -151,7 +151,7 @@ namespace Spoomples.Extensions.WildcardImporter
                 double random = context.Input.GetWildcardRandom().NextDouble() * TotalWeight;
                 int i = 0;
                 int stop = Choices.Count - 1;
-                while (i < stop && random > Choices[i].Weight)
+                while (i < stop && random >= Choices[i].Weight)
                 {
                     random -= Choices[i].Weight;
                     i++;
@@ -198,7 +198,7 @@ namespace Spoomples.Extensions.WildcardImporter
                         result += partSeparator;
                     }
                     result += context.Parse(choice).Trim();
-                    if (set.Choices.Count == 0)
+                    if (set.Choices.Count == 0 || set.TotalWeight < 0.01)
                     {
                         set = new WeightedSet(rawVals);
                     }

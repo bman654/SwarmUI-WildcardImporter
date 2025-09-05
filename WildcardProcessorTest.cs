@@ -82,6 +82,9 @@ namespace Spoomples.Extensions.WildcardImporter
             TestMalformedSyntax();
             TestComplexNesting();
             TestSpecialCharacters();
+            
+            // Test recursive processing regression tests
+            TestRecursiveProcessingRegression();
 
             // Print results
             Logs.Info($"WildcardProcessor tests completed: {_testsPassed} passed, {_testsFailed} failed");
@@ -446,15 +449,15 @@ namespace Spoomples.Extensions.WildcardImporter
                            "(just text:0.9) should be negative",
                            "No colons treated as negative attention");
 
-            // Edge case: empty step should not be treated as prompt editing
+            // Edge case: empty step is still valid prompt editing syntax - let SwarmUI validate
             AssertTransform("[girl:boy:] should be negative", 
-                           "(girl:boy::0.9) should be negative",
-                           "Empty step treated as negative attention");
+                           "<fromto[<comment:empty>]:girl||boy> should be negative",
+                           "Empty step treated as prompt editing");
 
-            // Edge case: non-numeric step should not be treated as prompt editing
+            // Edge case: non-numeric step is still valid prompt editing syntax - let SwarmUI validate
             AssertTransform("[girl:boy:abc] should be negative", 
-                           "(girl:boy:abc:0.9) should be negative",
-                           "Non-numeric step treated as negative attention");
+                           "<fromto[abc]:girl||boy> should be negative",
+                           "Non-numeric step treated as prompt editing");
 
             // Nested variants in from/to values (more realistic scenario)
             AssertTransform("[{red|blue}:target:3] test", 
@@ -670,6 +673,10 @@ namespace Spoomples.Extensions.WildcardImporter
             AssertTransform("{2$$__colors__|{red|blue}|green}", 
                            "<wcrandom[2,]:<wcwildcard:colors>|<wcrandom:red|blue>|green>",
                            "Quantifier with nested structures");
+
+            AssertTransform("${clothed_state={__scenes/${scene}/clothed_state__}}",
+                "<setmacro[clothed_state,false]:<wcwildcard:scenes/<macro:scene>/clothed_state>>",
+                "Wildcard with variable inside setvar");
         }
 
         private static void TestSpecialCharacters()
@@ -955,6 +962,162 @@ namespace Spoomples.Extensions.WildcardImporter
             AssertTransform("<ppp:echo  color  >  default  <ppp:/echo>", 
                            "<wcmatch:<wccase[length(color) == 0]:  default  ><wccase:<macro:color>>>",
                            "Echo command with whitespace");
+        }
+
+        #endregion
+
+        #region Recursive Processing Regression Tests
+
+        private static void TestRecursiveProcessingRegression()
+        {
+            // Test variants with nested variables
+            AssertTransform("{${color}|blue} car", 
+                           "<wcrandom:<macro:color>|blue> car",
+                           "Variant with variable in option");
+            
+            AssertTransform("{red|${color}|green} palette", 
+                           "<wcrandom:red|<macro:color>|green> palette",
+                           "Variant with variable in middle option");
+            
+            AssertTransform("{${primary}|${secondary}} colors", 
+                           "<wcrandom:<macro:primary>|<macro:secondary>> colors",
+                           "Variant with variables in multiple options");
+            
+            // Test variants with nested wildcards
+            AssertTransform("{__colors__|blue} theme", 
+                           "<wcrandom:<wcwildcard:colors>|blue> theme",
+                           "Variant with wildcard in option");
+            
+            AssertTransform("{red|__colors__|green} palette", 
+                           "<wcrandom:red|<wcwildcard:colors>|green> palette",
+                           "Variant with wildcard in middle option");
+            
+            // Test variants with nested variants
+            AssertTransform("{red|{light|dark} blue} colors", 
+                           "<wcrandom:red|<wcrandom:light|dark> blue> colors",
+                           "Variant with nested variant in option");
+            
+            // Test wildcards with nested variables
+            AssertTransform("__scenes/${scene}/clothed_state__ outfit", 
+                           "<wcwildcard:scenes/<macro:scene>/clothed_state> outfit",
+                           "Wildcard with variable in path");
+            
+            AssertTransform("__${category}/${subcategory}__ items", 
+                           "<wcwildcard:<macro:category>/<macro:subcategory>> items",
+                           "Wildcard with multiple variables in path");
+            
+            // Test wildcards with nested variants
+            AssertTransform("__{red|blue}_colors__ theme", 
+                           "<wcwildcard:<wcrandom:red|blue>_colors> theme",
+                           "Wildcard with variant in path");
+            
+            // Test prompt editing with nested variables
+            AssertTransform("[${from_color}:${to_color}:5] transition", 
+                           "<fromto[5]:<macro:from_color>||<macro:to_color>> transition",
+                           "Prompt editing with variables in from/to");
+            
+            // Test prompt editing with nested variants
+            AssertTransform("[{red|blue}:{green|yellow}:3] gradient", 
+                           "<fromto[3]:<wcrandom:red|blue>||<wcrandom:green|yellow>> gradient",
+                           "Prompt editing with variants in from/to");
+            
+            // Test prompt editing with nested wildcards
+            AssertTransform("[__start_colors__:__end_colors__:2] fade", 
+                           "<fromto[2]:<wcwildcard:start_colors>||<wcwildcard:end_colors>> fade",
+                           "Prompt editing with wildcards in from/to");
+            
+            // Test alternating words with nested variables
+            AssertTransform("[${animal1}|${animal2}] in field", 
+                           "<alternate:<macro:animal1>||<macro:animal2>> in field",
+                           "Alternating words with variables");
+            
+            // Test alternating words with nested variants
+            AssertTransform("[{red|crimson}|{blue|navy}] colors", 
+                           "<alternate:<wcrandom:red|crimson>||<wcrandom:blue|navy>> colors",
+                           "Alternating words with variants");
+            
+            // Test alternating words with nested wildcards
+            AssertTransform("[__animals__|__plants__] nature", 
+                           "<alternate:<wcwildcard:animals>||<wcwildcard:plants>> nature",
+                           "Alternating words with wildcards");
+            
+            // Test complex multi-level nesting
+            AssertTransform("{${color}|{light|dark} {red|blue}} theme", 
+                           "<wcrandom:<macro:color>|<wcrandom:light|dark> <wcrandom:red|blue>> theme",
+                           "Complex multi-level variant nesting");
+            
+            AssertTransform("__scenes/${scene}/{${mood}|happy}__ setting", 
+                           "<wcwildcard:scenes/<macro:scene>/<wcrandom:<macro:mood>|happy>> setting",
+                           "Complex wildcard with variable and variant");
+            
+            // Test quantified variants with nested content
+            AssertTransform("{2$$${color1}|${color2}|blue} palette", 
+                           "<wcrandom[2,]:<macro:color1>|<macro:color2>|blue> palette",
+                           "Quantified variant with variables");
+            
+            AssertTransform("{3$$__colors__|{red|green}|blue} mix", 
+                           "<wcrandom[3,]:<wcwildcard:colors>|<wcrandom:red|green>|blue> mix",
+                           "Quantified variant with wildcard and nested variant");
+            
+            // Test range variants with nested content
+            AssertTransform("{2-3$$${primary}|${secondary}|neutral} scheme", 
+                           "<wcrandom[2-3,]:<macro:primary>|<macro:secondary>|neutral> scheme",
+                           "Range variant with variables");
+            
+            // Test the original failing case that started this fix
+            AssertTransform("${clothed_state={__scenes/${scene}/clothed_state__}}", 
+                           "<setmacro[clothed_state,false]:<wcwildcard:scenes/<macro:scene>/clothed_state>>",
+                           "Original failing case - wildcard with variable inside setvar");
+            
+            // Test variable assignments with complex nested content
+            AssertTransform("${style={modern|__historical/${period}__}} building", 
+                           "<setmacro[style,false]:<wcrandom:modern|<wcwildcard:historical/<macro:period>>>> building",
+                           "Variable assignment with variant containing wildcard with variable");
+            
+            // Test immediate variable assignments with nested content
+            AssertTransform("${color=!{${primary}|${secondary}}} ${color} theme", 
+                           "<setvar[color,false]:<wcrandom:<macro:primary>|<macro:secondary>>><setmacro[color,false]:<var:color>> <macro:color> theme",
+                           "Immediate variable assignment with variant containing variables");
+            
+            // Test deeply nested structures
+            AssertTransform("{${outer}|{${inner1}|{${deep}|literal}}} test", 
+                           "<wcrandom:<macro:outer>|<wcrandom:<macro:inner1>|<wcrandom:<macro:deep>|literal>>> test",
+                           "Deeply nested variants with variables");
+            
+            // Test mixed constructs in complex scenarios
+            AssertTransform("[{${from_style}|modern}:{${to_style}|classic}:${steps}] and [{${animal1}|cat}|{${animal2}|dog}] scene", 
+                           "<fromto[<macro:steps>]:<wcrandom:<macro:from_style>|modern>||<wcrandom:<macro:to_style>|classic>> and <alternate:<wcrandom:<macro:animal1>|cat>||<wcrandom:<macro:animal2>|dog>> scene",
+                           "Complex mixed constructs with variables and variants");
+            
+            // Test negative attention with nested variables
+            AssertTransform("[${color} car] in scene", 
+                           "(<macro:color> car:0.9) in scene",
+                           "Negative attention with variable");
+            
+            // Test negative attention with nested variants
+            AssertTransform("[{red|blue} car] in garage", 
+                           "(<wcrandom:red|blue> car:0.9) in garage",
+                           "Negative attention with variant");
+            
+            // Test negative attention with nested wildcards
+            AssertTransform("[__colors__ theme] design", 
+                           "(<wcwildcard:colors> theme:0.9) design",
+                           "Negative attention with wildcard");
+            
+            // Test nested negative attention with complex content
+            AssertTransform("[{${primary}|__colors__} and ${secondary}] palette", 
+                           "(<wcrandom:<macro:primary>|<wcwildcard:colors>> and <macro:secondary>:0.9) palette",
+                           "Negative attention with mixed nested constructs");
+            
+            // Test multiple levels of negative attention
+            AssertTransform("[[${inner}] outer] content", 
+                           "((<macro:inner>:0.9) outer:0.9) content",
+                           "Nested negative attention with variable");
+            
+            // Test negative attention with variable assignments
+            AssertTransform("[${style={modern|classic}} building] architecture", 
+                           "(<setmacro[style,false]:<wcrandom:modern|classic>> building:0.9) architecture",
+                           "Negative attention with variable assignment containing variant");
         }
 
         #endregion

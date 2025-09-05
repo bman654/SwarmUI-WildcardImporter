@@ -361,7 +361,7 @@ namespace Spoomples.Extensions.WildcardImporter
             line = ProcessAlternatingWords(line, _tasks[taskId]);
             
             // Process negative attention specifiers: [text] -> (text:0.9)
-            line = ProcessNegativeAttention(line);
+            line = ProcessNegativeAttention(line, taskId);
 
             // See https://github.com/adieyal/sd-dynamic-prompts/blob/main/docs/SYNTAX.md#variants
             // Replace {} variants.
@@ -775,13 +775,29 @@ namespace Spoomples.Extensions.WildcardImporter
                 {
                     // Add the last option
                     string lastOption = content.Substring(lastIndex);
-                    options.Add(string.IsNullOrEmpty(lastOption.Trim()) ? "<comment:empty>" : lastOption);
+                    if (string.IsNullOrEmpty(lastOption.Trim()))
+                    {
+                        options.Add("<comment:empty>");
+                    }
+                    else
+                    {
+                        // Recursively process the option to handle nested syntax
+                        options.Add(ProcessWildcardLine(lastOption, task.Id));
+                    }
                     break;
                 }
                 
                 // Add the current option
                 string option = content.Substring(lastIndex, pipeIndex - lastIndex);
-                options.Add(string.IsNullOrEmpty(option.Trim()) ? "<comment:empty>" : option);
+                if (string.IsNullOrEmpty(option.Trim()))
+                {
+                    options.Add("<comment:empty>");
+                }
+                else
+                {
+                    // Recursively process the option to handle nested syntax
+                    options.Add(ProcessWildcardLine(option, task.Id));
+                }
                 
                 lastIndex = pipeIndex + 1;
             }
@@ -877,18 +893,9 @@ namespace Spoomples.Extensions.WildcardImporter
                 searchStart = colonIndex + 1;
             }
             
-            // Must have exactly 2 colons for prompt editing syntax
-            if (colonIndices.Count != 2)
-                return false;
-            
-            // Extract the step part (after the second colon)
-            string stepPart = content.Substring(colonIndices[1] + 1);
-            
-            // Step must be a valid number (integer or decimal)
-            if (string.IsNullOrWhiteSpace(stepPart))
-                return false;
-                
-            return double.TryParse(stepPart.Trim(), out _);
+            // Must have exactly 2 colons for prompt editing syntax [a:b:c]
+            // We don't validate what 'c' contains - let SwarmUI validate parameters at runtime
+            return colonIndices.Count == 2;
         }
         
         /// <summary>
@@ -921,22 +928,21 @@ namespace Spoomples.Extensions.WildcardImporter
             string toPart = content.Substring(colonIndices[0] + 1, colonIndices[1] - colonIndices[0] - 1);
             string stepPart = content.Substring(colonIndices[1] + 1);
             
-            // Process each part (they might contain variants, wildcards, etc.)
-            // But we need to be careful not to process them recursively here since they'll be processed later
-            string processedFrom = string.IsNullOrEmpty(fromPart.Trim()) ? "<comment:empty>" : fromPart;
-            string processedTo = string.IsNullOrEmpty(toPart.Trim()) ? "<comment:empty>" : toPart;
-            string processedStep = stepPart.Trim();
+            // Recursively process from, to, and step parts to handle nested syntax
+            string processedFrom = string.IsNullOrEmpty(fromPart.Trim()) ? "<comment:empty>" : ProcessWildcardLine(fromPart, task.Id);
+            string processedTo = string.IsNullOrEmpty(toPart.Trim()) ? "<comment:empty>" : ProcessWildcardLine(toPart, task.Id);
+            string processedStep = string.IsNullOrEmpty(stepPart.Trim()) ? "<comment:empty>" : ProcessWildcardLine(stepPart, task.Id);
             
             return $"<fromto[{processedStep}]:{processedFrom}||{processedTo}>";
         }
 
-        private string ProcessNegativeAttention(string input)
+        private string ProcessNegativeAttention(string input, string taskId)
         {
             // Use a recursive approach to handle nested brackets properly
-            return ProcessNegativeAttentionRecursive(input);
+            return ProcessNegativeAttentionRecursive(input, taskId);
         }
         
-        private string ProcessNegativeAttentionRecursive(string input)
+        private string ProcessNegativeAttentionRecursive(string input, string taskId)
         {
             var result = new StringBuilder(input);
             var startIndex = 0;
@@ -976,7 +982,10 @@ namespace Spoomples.Extensions.WildcardImporter
                 string content = result.ToString().Substring(bracketStartIndex + 1, closeBracketIndex - bracketStartIndex - 1);
                 
                 // Recursively process the content first to handle nested brackets
-                string processedContent = ProcessNegativeAttentionRecursive(content);
+                string processedContent = ProcessNegativeAttentionRecursive(content, taskId);
+                
+                // Then process wildcard constructs within the content
+                processedContent = ProcessWildcardLine(processedContent, taskId);
                 
                 // Calculate the weight - if already processed, compound it
                 double weight = 0.9;
@@ -1203,7 +1212,7 @@ namespace Spoomples.Extensions.WildcardImporter
             else
             {
                 // Simple variant without quantifier
-                return ProcessVariantOptions(content, "");
+                return ProcessVariantOptions(content, "", task);
             }
         }
 
@@ -1268,12 +1277,12 @@ namespace Spoomples.Extensions.WildcardImporter
                 }
                 Logs.Debug($"WildcardProcessor: Not a single wildcard, proceeding with normal variant processing");
                 
-                return ProcessVariantOptions(optionsPart, quantifierSpec);
+                return ProcessVariantOptions(optionsPart, quantifierSpec, task);
             }
             else
             {
                 // If it doesn't match the quantifier pattern, treat it as a simple variant
-                return ProcessVariantOptions(content, "");
+                return ProcessVariantOptions(content, "", task);
             }
         }
 
@@ -1309,18 +1318,22 @@ namespace Spoomples.Extensions.WildcardImporter
         private string ProcessWildcardRef(string quantityString, string reference, string taskId)
         {
             var task = _tasks[taskId];
+            
+            // Recursively process the reference to handle nested syntax like ${variable}
+            string processedReference = ProcessWildcardLine(reference, taskId);
+            
             // Check if reference contains glob patterns (* or **)
-            if (reference.Contains('*'))
+            if (processedReference.Contains('*'))
             {
-                return ProcessGlobWildcardRef(quantityString, reference, taskId);
+                return ProcessGlobWildcardRef(quantityString, processedReference, taskId);
             }
             
             // Standard non-glob reference
             if (string.IsNullOrEmpty(quantityString))
             {
-                return $"<wcwildcard:{task.Prefix + reference}>";
+                return $"<wcwildcard:{task.Prefix + processedReference}>";
             }
-            return $"<wcwildcard[{quantityString}]:{task.Prefix + reference}>";
+            return $"<wcwildcard[{quantityString}]:{task.Prefix + processedReference}>";
         }
         
         private string ProcessGlobWildcardRef(string quantityString, string reference, string taskId)
@@ -1420,16 +1433,21 @@ namespace Spoomples.Extensions.WildcardImporter
             return Regex.IsMatch(path, $"^{regexPattern}$", RegexOptions.IgnoreCase);
         }
 
-        private string ProcessVariantOptions(string optionsPart, string quantifierSpec)
+        private string ProcessVariantOptions(string optionsPart, string quantifierSpec, ProcessingTask task)
         {
             string[] options = optionsPart.Split('|');
             
-            // Handle empty options
+            // Handle empty options and recursively process each option
             for (int i = 0; i < options.Length; i++)
             {
                 if (string.IsNullOrEmpty(options[i]))
                 {
                     options[i] = "<comment:empty>";
+                }
+                else
+                {
+                    // Recursively process each option to handle nested syntax
+                    options[i] = ProcessWildcardLine(options[i], task.Id);
                 }
             }
 
