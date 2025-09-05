@@ -363,6 +363,11 @@ namespace Spoomples.Extensions.WildcardImporter
             // Process negative attention specifiers: [text] -> (text:0.9)
             line = ProcessNegativeAttention(line, taskId);
 
+            // Replace BREAK words with <comment:empty>
+            // Only replace capital BREAK that is a standalone word (word boundaries)
+            // Avoid replacing BREAK inside wildcard paths, variable names, or wccase expressions
+            line = ProcessBreakWords(line);
+
             // See https://github.com/adieyal/sd-dynamic-prompts/blob/main/docs/SYNTAX.md#variants
             // Replace {} variants.
             // Can come in all these variations:
@@ -379,6 +384,43 @@ namespace Spoomples.Extensions.WildcardImporter
             // Process all variants with proper brace matching, including nested variants
             return ProcessVariants(line, _tasks[taskId]);
         }
+
+        private string ProcessBreakWords(string input)
+        {
+            // Replace BREAK words with <comment:empty>
+            // Only replace capital BREAK that is a standalone word
+            // Protect BREAK if it has non-space, non-comma characters on either side
+            // This naturally protects wildcard paths (__path/BREAK/file__) and variable names (${BREAK})
+            
+            var result = new StringBuilder();
+            int i = 0;
+            
+            while (i < input.Length)
+            {
+                // Check if we're at the start of "BREAK"
+                if (i + 4 < input.Length && input.Substring(i, 5) == "BREAK")
+                {
+                    // Check if BREAK has non-space, non-comma characters on either side
+                    bool hasProtectedCharBefore = i > 0 && input[i - 1] != ' ' && input[i - 1] != ',' && input[i - 1] != '\t' && input[i - 1] != '\n' && input[i - 1] != '\r';
+                    bool hasProtectedCharAfter = i + 5 < input.Length && input[i + 5] != ' ' && input[i + 5] != ',' && input[i + 5] != '\t' && input[i + 5] != '\n' && input[i + 5] != '\r';
+                    
+                    // Only replace BREAK if it doesn't have protected characters on either side
+                    if (!hasProtectedCharBefore && !hasProtectedCharAfter)
+                    {
+                        // Replace BREAK with <comment:empty>
+                        result.Append("<comment:empty>");
+                        i += 5; // Skip past "BREAK"
+                        continue;
+                    }
+                }
+                
+                result.Append(input[i]);
+                i++;
+            }
+            
+            return result.ToString();
+        }
+        
 
         private string ProcessVariables(string input, ProcessingTask task)
         {

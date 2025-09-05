@@ -86,6 +86,10 @@ namespace Spoomples.Extensions.WildcardImporter
             // Test recursive processing regression tests
             TestRecursiveProcessingRegression();
 
+            // Test BREAK word replacement
+            TestBreakWordReplacement();
+            TestBreakWordProtectedContexts();
+
             // Print results
             Logs.Info($"WildcardProcessor tests completed: {_testsPassed} passed, {_testsFailed} failed");
             if (_testsFailed > 0)
@@ -1539,6 +1543,133 @@ namespace Spoomples.Extensions.WildcardImporter
             AssertTransform("<ppp:stn i1>text <ppp:stn p1>negative<ppp:/stn> more",
                            "text <wcnegative:, negative> more",
                            "Mixed STN insertion point and command");
+        }
+
+        #endregion
+
+        #region BREAK Word Replacement Tests
+
+        private static void TestBreakWordReplacement()
+        {
+            // Basic BREAK replacement
+            AssertTransform("BREAK",
+                           "<comment:empty>",
+                           "Basic BREAK replacement");
+
+            // BREAK with surrounding text
+            AssertTransform("hello BREAK world",
+                           "hello <comment:empty> world",
+                           "BREAK with surrounding text");
+
+            // Multiple BREAK words
+            AssertTransform("BREAK and BREAK again",
+                           "<comment:empty> and <comment:empty> again",
+                           "Multiple BREAK words");
+
+            // BREAK at start and end
+            AssertTransform("BREAK middle BREAK",
+                           "<comment:empty> middle <comment:empty>",
+                           "BREAK at start and end");
+
+            // BREAK with punctuation - exclamation mark protects BREAK
+            AssertTransform("hello, BREAK! world?",
+                           "hello, BREAK! world?",
+                           "BREAK with punctuation (protected by !)");
+
+            // BREAK with proper spacing should be replaced
+            AssertTransform("hello, BREAK , world",
+                           "hello, <comment:empty> , world",
+                           "BREAK with proper spacing");
+
+            // Case sensitivity - only BREAK should be replaced
+            AssertTransform("break Break BREAK",
+                           "break Break <comment:empty>",
+                           "Case sensitivity test");
+
+            // BREAK as part of another word should NOT be replaced
+            AssertTransform("BREAKDOWN BREAKFAST unBREAKable",
+                           "BREAKDOWN BREAKFAST unBREAKable",
+                           "BREAK as part of other words");
+
+            // BREAK with underscores should NOT be replaced
+            AssertTransform("_BREAK BREAK_ _BREAK_",
+                           "_BREAK BREAK_ _BREAK_",
+                           "BREAK with underscores");
+        }
+
+        private static void TestBreakWordProtectedContexts()
+        {
+            // BREAK inside wildcard paths should NOT be replaced (protected by non-space characters)
+            AssertTransform("__wildcards/break/foo__",
+                           "<wcwildcard:wildcards/break/foo>",
+                           "BREAK in wildcard path (lowercase)");
+
+            AssertTransform("__wildcards/BREAK/foo__",
+                           "<wcwildcard:wildcards/BREAK/foo>",
+                           "BREAK in wildcard path (uppercase)");
+
+            AssertTransform("__some/BREAK/path__",
+                           "<wcwildcard:some/BREAK/path>",
+                           "BREAK in middle of wildcard path");
+
+            // BREAK inside variable names should NOT be replaced (protected by non-space characters)
+            AssertTransform("${break=32}",
+                           "<setmacro[break,false]:32>",
+                           "break in variable assignment (lowercase)");
+
+            AssertTransform("${BREAK=value}",
+                           "<setmacro[BREAK,false]:value>",
+                           "BREAK in variable assignment (uppercase)");
+
+            AssertTransform("${BREAK}",
+                           "<macro:BREAK>",
+                           "BREAK as variable name");
+
+            AssertTransform("${some_BREAK_var=test}",
+                           "<setmacro[some_BREAK_var,false]:test>",
+                           "BREAK in compound variable name");
+
+            // BREAK outside protected contexts should still be replaced
+            AssertTransform("BREAK __wildcards/test__ BREAK",
+                           "<comment:empty> <wcwildcard:wildcards/test> <comment:empty>",
+                           "BREAK outside wildcard context");
+
+            AssertTransform("BREAK ${var=value} BREAK",
+                           "<comment:empty> <setmacro[var,false]:value> <comment:empty>",
+                           "BREAK outside variable context");
+
+            // Complex mixed scenarios - BREAK inside wildcard path should be protected
+            AssertTransform("hello BREAK __path/BREAK/file__ and BREAK ${BREAK=test} more BREAK",
+                           "hello <comment:empty> <wcwildcard:path/BREAK/file> and <comment:empty> <setmacro[BREAK,false]:test> more <comment:empty>",
+                           "Complex mixed BREAK scenarios");
+
+            // BREAK inside already processed directives should NOT be replaced (protected by non-space characters)
+            AssertTransform("<wccase[BREAK]>content</wccase>",
+                           "<wccase[BREAK]>content</wccase>",
+                           "BREAK inside directive");
+
+            // Test with variants containing BREAK - should be replaced since surrounded by | and }
+            AssertTransform("{BREAK|test}",
+                           "<wcrandom:<comment:empty>|test>",
+                           "BREAK in variant options");
+
+            AssertTransform("{hello|BREAK|world}",
+                           "<wcrandom:hello|<comment:empty>|world>",
+                           "BREAK mixed with other variant options");
+
+            // Test BREAK with commas (should be replaced since comma is allowed)
+            AssertTransform("hello, BREAK, world",
+                           "hello, <comment:empty>, world",
+                           "BREAK with commas");
+
+            // Test BREAK with other punctuation (should NOT be replaced)
+            AssertTransform("hello.BREAK.world",
+                           "hello.BREAK.world",
+                           "BREAK with periods (protected)");
+
+            AssertTransform("path/BREAK/file",
+                           "path/BREAK/file",
+                           "BREAK with slashes (protected)");
         }
 
         #endregion
