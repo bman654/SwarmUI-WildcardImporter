@@ -322,6 +322,8 @@ namespace Spoomples.Extensions.WildcardImporter
 
         private string ProcessWildcardLine(string line, string taskId)
         {
+            Logs.Verbose($"WildcardProcessor: ProcessWildcardLine called with line='{line}'");
+            
             // See https://github.com/adieyal/sd-dynamic-prompts/blob/main/docs/SYNTAX.md#wildcards
             // Replace __wildcards__
             // Matches should include:
@@ -337,6 +339,34 @@ namespace Spoomples.Extensions.WildcardImporter
             });
             
             line = ProcessVariables(line, _tasks[taskId]);
+            
+            // Process set commands BEFORE other processing
+            line = ProcessSetCommands(line, _tasks[taskId]);
+            
+            // Process echo commands BEFORE other processing
+            line = ProcessEchoCommands(line, _tasks[taskId]);
+            
+            // Process if commands BEFORE other processing
+            line = ProcessIfCommands(line, _tasks[taskId]);
+            
+            // Process STN commands BEFORE other processing
+            line = ProcessStnCommands(line, _tasks[taskId]);
+            
+            // Process prompt editing BEFORE negative attention to avoid conflicts
+            // [from:to:step] -> <fromto[step]:from||to>
+            line = ProcessPromptEditing(line, _tasks[taskId]);
+            
+            // Process alternating words AFTER prompt editing but BEFORE negative attention
+            // [word1|word2|word3] -> <alternate:word1||word2||word3>
+            line = ProcessAlternatingWords(line, _tasks[taskId]);
+            
+            // Process negative attention specifiers: [text] -> (text:0.9)
+            line = ProcessNegativeAttention(line, taskId);
+
+            // Replace BREAK words with <comment:empty>
+            // Only replace capital BREAK that is a standalone word (word boundaries)
+            // Avoid replacing BREAK inside wildcard paths, variable names, or wccase expressions
+            line = ProcessBreakWords(line);
 
             // See https://github.com/adieyal/sd-dynamic-prompts/blob/main/docs/SYNTAX.md#variants
             // Replace {} variants.
@@ -354,6 +384,43 @@ namespace Spoomples.Extensions.WildcardImporter
             // Process all variants with proper brace matching, including nested variants
             return ProcessVariants(line, _tasks[taskId]);
         }
+
+        private string ProcessBreakWords(string input)
+        {
+            // Replace BREAK words with <comment:empty>
+            // Only replace capital BREAK that is a standalone word
+            // Protect BREAK if it has non-space, non-comma characters on either side
+            // This naturally protects wildcard paths (__path/BREAK/file__) and variable names (${BREAK})
+            
+            var result = new StringBuilder();
+            int i = 0;
+            
+            while (i < input.Length)
+            {
+                // Check if we're at the start of "BREAK"
+                if (i + 4 < input.Length && input.Substring(i, 5) == "BREAK")
+                {
+                    // Check if BREAK has non-space, non-comma characters on either side
+                    bool hasProtectedCharBefore = i > 0 && input[i - 1] != ' ' && input[i - 1] != ',' && input[i - 1] != '\t' && input[i - 1] != '\n' && input[i - 1] != '\r';
+                    bool hasProtectedCharAfter = i + 5 < input.Length && input[i + 5] != ' ' && input[i + 5] != ',' && input[i + 5] != '\t' && input[i + 5] != '\n' && input[i + 5] != '\r';
+                    
+                    // Only replace BREAK if it doesn't have protected characters on either side
+                    if (!hasProtectedCharBefore && !hasProtectedCharAfter)
+                    {
+                        // Replace BREAK with <comment:empty>
+                        result.Append("<comment:empty>");
+                        i += 5; // Skip past "BREAK"
+                        continue;
+                    }
+                }
+                
+                result.Append(input[i]);
+                i++;
+            }
+            
+            return result.ToString();
+        }
+        
 
         private string ProcessVariables(string input, ProcessingTask task)
         {
@@ -390,30 +457,109 @@ namespace Spoomples.Extensions.WildcardImporter
                 string varContent = result.ToString().Substring(varStartIndex + 2, closeBraceIndex - varStartIndex - 2);
                 string replacement;
                 
-                // Check if this is a variable assignment or access
-                int equalsIndex = varContent.IndexOf('=');
-                if (equalsIndex != -1)
+                // Check for completely empty variable content: ${}
+                if (string.IsNullOrWhiteSpace(varContent))
                 {
-                    // Variable assignment
+                    // Return original malformed syntax - move past this and continue
+                    startIndex = varStartIndex + 2;
+                    continue;
+                }
+                // Check if this is a variable assignment or access
+                else if (varContent.IndexOf('=') != -1)
+                {
+                    int equalsIndex = varContent.IndexOf('=');
+                    // Variable assignment - check for special operators
                     string varName = varContent.Substring(0, equalsIndex);
                     string varValue = varContent.Substring(equalsIndex + 1);
                     
-                    // Immediate or deferred?
-                    if (varValue.StartsWith("!"))
+                    // Check for add operator (+=)
+                    if (varName.EndsWith("+"))
                     {
-                        varValue = varValue.Substring(1);
-                        replacement = $"<setvar[{varName},false]:{varValue}><setmacro[{varName},false]:<var:{varName}>>";
+                        varName = varName.Substring(0, varName.Length - 1);
+                        
+                        // Immediate add or deferred add?
+                        if (varValue.StartsWith("!"))
+                        {
+                            varValue = varValue.Substring(1);
+                            // Immediate add: ${var+=!value} -> <setvar[var,false]:<macro:var>, value><setmacro[var,false]:<var:var>>
+                            replacement = $"<setvar[{varName},false]:<macro:{varName}>, {varValue}><setmacro[{varName},false]:<var:{varName}>>";
+                        }
+                        else
+                        {
+                            // Deferred add: ${var+=value} -> <wcaddmacro[var]:, value>
+                            replacement = $"<wcaddmacro[{varName}]:, {varValue}>";
+                        }
+                    }
+                    // Check for ifundefined operator (?=)
+                    else if (varName.EndsWith("?"))
+                    {
+                        varName = varName.Substring(0, varName.Length - 1);
+                        
+                        // Immediate ifundefined or deferred ifundefined?
+                        if (varValue.StartsWith("!"))
+                        {
+                            varValue = varValue.Substring(1);
+                            // Immediate ifundefined: ${var?=!value} -> <wcmatch:<wccase[length(var) == 0]:<setvar[var,false]:value><setmacro[var,false]:<var:var>>>>
+                            replacement = $"<wcmatch:<wccase[length({varName}) == 0]:<setvar[{varName},false]:{varValue}><setmacro[{varName},false]:<var:{varName}>>>>";
+                        }
+                        else
+                        {
+                            // Deferred ifundefined: ${var?=value} -> <wcmatch:<wccase[length(var) == 0]:<setmacro[var,false]:value>>>
+                            replacement = $"<wcmatch:<wccase[length({varName}) == 0]:<setmacro[{varName},false]:{varValue}>>>";
+                        }
                     }
                     else
                     {
-                        // deferred
-                        replacement = $"<setmacro[{varName},false]:{varValue}>";
+                        // Regular assignment
+                        // Immediate or deferred?
+                        if (varValue.StartsWith("!"))
+                        {
+                            varValue = varValue.Substring(1);
+                            replacement = $"<setvar[{varName},false]:{varValue}><setmacro[{varName},false]:<var:{varName}>>";
+                        }
+                        else
+                        {
+                            // deferred
+                            replacement = $"<setmacro[{varName},false]:{varValue}>";
+                        }
                     }
                 }
                 else
                 {
-                    // Variable access
-                    replacement = $"<macro:{varContent}>";
+                    // Variable access - check for default value syntax: ${var:default}
+                    int colonIndex = varContent.IndexOf(':');
+                    if (colonIndex != -1)
+                    {
+                        // Variable with default: ${var:default}
+                        string variableName = varContent.Substring(0, colonIndex).Trim();
+                        string defaultValue = varContent.Substring(colonIndex + 1);
+                        
+                        // Check for malformed cases (empty variable name)
+                        if (string.IsNullOrWhiteSpace(variableName))
+                        {
+                            // Return original malformed syntax - move past this and continue
+                            startIndex = varStartIndex + 2;
+                            continue;
+                        }
+                        else if (string.IsNullOrEmpty(defaultValue))
+                        {
+                            // Empty default, just return <macro:varname>
+                            replacement = $"<macro:{variableName}>";
+                        }
+                        else
+                        {
+                            // Process the default value recursively to handle nested syntax
+                            string processedDefault = ProcessWildcardLine(defaultValue, task.Id);
+                            
+                            // Return wcmatch with condition for empty variable and else clause
+                            replacement = $"<wcmatch:<wccase[length({variableName}) == 0]:{processedDefault}><wccase:<macro:{variableName}>>>";
+                        }
+                    }
+                    else
+                    {
+                        // Simple variable access: ${var}
+                        replacement = $"<macro:{varContent}>";
+                    }
                 }
                 
                 // Replace the entire variable expression with the new format
@@ -425,6 +571,610 @@ namespace Spoomples.Extensions.WildcardImporter
             }
             
             return result.ToString();
+        }
+
+        private string ProcessSetCommands(string input, ProcessingTask task)
+        {
+            /*
+             * Long-form set commands look like:
+             * - <ppp:set varname>value<ppp:/set> -> <setmacro[varname,false]:value>
+             * - <ppp:set varname evaluate>value<ppp:/set> -> <setvar[varname,false]:value><setmacro[varname,false]:<var:varname>>
+             * - <ppp:set varname add>value<ppp:/set> -> <wcaddmacro[varname]:, value>
+             * - <ppp:set varname evaluate add>value<ppp:/set> -> <setvar[varname,false]:<macro:varname>, value><setmacro[varname,false]:<var:varname>>
+             * - <ppp:set varname ifundefined>value<ppp:/set> -> <wcmatch:<wccase[length(varname) == 0]:<setmacro[varname,false]:value>>>
+             * - <ppp:set varname evaluate ifundefined>value<ppp:/set> -> <wcmatch:<wccase[length(varname) == 0]:<setvar[varname,false]:value><setmacro[varname,false]:<var:varname>>>>
+             */
+            var result = new StringBuilder(input);
+            var startIndex = 0;
+            
+            while (true)
+            {
+                // Find the next set command pattern
+                var setStartIndex = result.ToString().IndexOf("<ppp:set ", startIndex, StringComparison.Ordinal);
+                if (setStartIndex == -1)
+                    break;
+                
+                // Find the matching closing tag
+                var setEndIndex = result.ToString().IndexOf("<ppp:/set>", setStartIndex, StringComparison.Ordinal);
+                if (setEndIndex == -1)
+                {
+                    // No matching closing tag found, move past this opening and continue
+                    task.AddWarning("Malformed set command: no closing <ppp:/set> tag found");
+                    startIndex = setStartIndex + 9; // length of "<ppp:set "
+                    continue;
+                }
+                
+                // Extract the set command content
+                string setContent = result.ToString().Substring(setStartIndex + 9, setEndIndex - setStartIndex - 9); // 9 = length of "<ppp:set "
+                
+                // Find where the variable name and modifiers end (look for >)
+                int valueStartIndex = setContent.IndexOf('>');
+                if (valueStartIndex == -1)
+                {
+                    // Malformed set command, skip it
+                    task.AddWarning("Malformed set command missing closing >: <ppp:set " + setContent + "<ppp:/set>");
+                    startIndex = setStartIndex + 9;
+                    continue;
+                }
+                
+                string varAndModifiers = setContent.Substring(0, valueStartIndex).Trim();
+                string value = setContent.Substring(valueStartIndex + 1);
+                
+                // Handle empty values
+                if (string.IsNullOrEmpty(value))
+                {
+                    value = "<comment:empty>";
+                }
+                
+                // Parse variable name and modifiers
+                string[] parts = varAndModifiers.Split(new char[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length == 0)
+                {
+                    // No variable name, skip
+                    task.AddWarning("Malformed set command: no variable name specified: <ppp:set " + setContent + "<ppp:/set>");
+                    startIndex = setStartIndex + 9;
+                    continue;
+                }
+                
+                string varName = parts[0];
+                var modifiers = new HashSet<string>(parts.Skip(1), StringComparer.OrdinalIgnoreCase);
+                
+                // Check for invalid modifier combinations
+                if (modifiers.Contains("add") && modifiers.Contains("ifundefined"))
+                {
+                    task.AddWarning("Invalid modifier combination: 'add' and 'ifundefined' cannot be used together");
+                    // Leave as literal text
+                    startIndex = setEndIndex + 10; // length of "<ppp:/set>"
+                    continue;
+                }
+                
+                string replacement;
+                
+                // Generate appropriate replacement based on modifiers
+                if (modifiers.Contains("ifundefined"))
+                {
+                    if (modifiers.Contains("evaluate"))
+                    {
+                        // Immediate ifundefined: <wcmatch:<wccase[length(varname) == 0]:<setvar[varname,false]:value><setmacro[varname,false]:<var:varname>>>>
+                        replacement = $"<wcmatch:<wccase[length({varName}) == 0]:<setvar[{varName},false]:{value}><setmacro[{varName},false]:<var:{varName}>>>>";
+                    }
+                    else
+                    {
+                        // Deferred ifundefined: <wcmatch:<wccase[length(varname) == 0]:<setmacro[varname,false]:value>>>
+                        replacement = $"<wcmatch:<wccase[length({varName}) == 0]:<setmacro[{varName},false]:{value}>>>";
+                    }
+                }
+                else if (modifiers.Contains("add"))
+                {
+                    if (modifiers.Contains("evaluate"))
+                    {
+                        // Immediate add: <setvar[varname,false]:<macro:varname>, value><setmacro[varname,false]:<var:varname>>
+                        replacement = $"<setvar[{varName},false]:<macro:{varName}>, {value}><setmacro[{varName},false]:<var:{varName}>>";
+                    }
+                    else
+                    {
+                        // Deferred add: <wcaddmacro[varname]:, value>
+                        replacement = $"<wcaddmacro[{varName}]:, {value}>";
+                    }
+                }
+                else
+                {
+                    if (modifiers.Contains("evaluate"))
+                    {
+                        // Immediate assignment: <setvar[varname,false]:value><setmacro[varname,false]:<var:varname>>
+                        replacement = $"<setvar[{varName},false]:{value}><setmacro[{varName},false]:<var:{varName}>>";
+                    }
+                    else
+                    {
+                        // Deferred assignment: <setmacro[varname,false]:value>
+                        replacement = $"<setmacro[{varName},false]:{value}>";
+                    }
+                }
+                
+                // Replace the entire set command with the new format
+                int totalLength = setEndIndex - setStartIndex + 10; // +10 for "<ppp:/set>"
+                result.Remove(setStartIndex, totalLength);
+                result.Insert(setStartIndex, replacement);
+                
+                // Update the start index for the next search
+                startIndex = setStartIndex + replacement.Length;
+            }
+            
+            return result.ToString();
+        }
+
+        private string ProcessAlternatingWords(string input, ProcessingTask task)
+        {
+            var result = new StringBuilder(input);
+            var startIndex = 0;
+            
+            while (true)
+            {
+                // Find the next bracket that could be alternating words
+                var bracketStartIndex = result.ToString().IndexOf("[", startIndex, StringComparison.Ordinal);
+                if (bracketStartIndex == -1)
+                    break;
+                
+                // Check if this bracket is escaped
+                if (bracketStartIndex > 0 && result[bracketStartIndex - 1] == '\\')
+                {
+                    startIndex = bracketStartIndex + 1;
+                    continue;
+                }
+                
+                // Check if this bracket is part of SwarmUI syntax (inside < >)
+                if (IsInsideSwarmUITag(result.ToString(), bracketStartIndex))
+                {
+                    startIndex = bracketStartIndex + 1;
+                    continue;
+                }
+                
+                // Find the matching closing bracket
+                int closeBracketIndex = FindMatchingClosingSquareBracket(result.ToString(), bracketStartIndex);
+                
+                if (closeBracketIndex == -1)
+                {
+                    // No matching closing bracket found, move past this opening and continue
+                    startIndex = bracketStartIndex + 1;
+                    continue;
+                }
+                
+                // Extract the content inside the brackets (without the [])
+                string content = result.ToString().Substring(bracketStartIndex + 1, closeBracketIndex - bracketStartIndex - 1);
+                
+                // Check if this is alternating words syntax: [word1|word2|...]
+                if (IsAlternatingWordsSyntax(content))
+                {
+                    // Process as alternating words
+                    string replacement = ProcessAlternatingWordsContent(content, task);
+                    
+                    // Replace the entire alternating words expression with the new format
+                    result.Remove(bracketStartIndex, closeBracketIndex - bracketStartIndex + 1);
+                    result.Insert(bracketStartIndex, replacement);
+                    
+                    // Update the start index for the next search
+                    startIndex = bracketStartIndex + replacement.Length;
+                }
+                else
+                {
+                    // Not alternating words, skip this bracket
+                    startIndex = bracketStartIndex + 1;
+                }
+            }
+            
+            return result.ToString();
+        }
+        
+        /// <summary>
+        /// Checks if the content inside brackets matches alternating words syntax: word1|word2|...
+        /// Must have at least 2 options separated by pipes at the top level.
+        /// </summary>
+        /// <param name="content">The content inside the brackets.</param>
+        /// <returns>True if it's alternating words syntax, false otherwise.</returns>
+        private bool IsAlternatingWordsSyntax(string content)
+        {
+            // Find pipes at the top level (not inside nested structures)
+            char[] openChars = { '{', '[', '<' };
+            char[] closeChars = { '}', ']', '>' };
+            
+            var pipeIndices = new List<int>();
+            int searchStart = 0;
+            
+            while (true)
+            {
+                int pipeIndex = FindTopLevelChar(content, searchStart, '|', openChars, closeChars);
+                if (pipeIndex == -1)
+                    break;
+                    
+                pipeIndices.Add(pipeIndex);
+                searchStart = pipeIndex + 1;
+            }
+            
+            // Must have at least 1 pipe (meaning at least 2 options) for alternating words
+            // If no pipes, it should be treated as negative attention
+            return pipeIndices.Count >= 1;
+        }
+        
+        /// <summary>
+        /// Processes alternating words content and converts it to SwarmUI syntax.
+        /// </summary>
+        /// <param name="content">The content inside the brackets: word1|word2|word3</param>
+        /// <param name="task">The processing task for context.</param>
+        /// <returns>The converted SwarmUI syntax: &lt;alternate:word1||word2||word3&gt;</returns>
+        private string ProcessAlternatingWordsContent(string content, ProcessingTask task)
+        {
+            // Split on pipes at the top level
+            char[] openChars = { '{', '[', '<' };
+            char[] closeChars = { '}', ']', '>' };
+            
+            var options = new List<string>();
+            int lastIndex = 0;
+            
+            while (true)
+            {
+                int pipeIndex = FindTopLevelChar(content, lastIndex, '|', openChars, closeChars);
+                if (pipeIndex == -1)
+                {
+                    // Add the last option
+                    string lastOption = content.Substring(lastIndex);
+                    if (string.IsNullOrEmpty(lastOption.Trim()))
+                    {
+                        options.Add("<comment:empty>");
+                    }
+                    else
+                    {
+                        // Recursively process the option to handle nested syntax
+                        options.Add(ProcessWildcardLine(lastOption, task.Id));
+                    }
+                    break;
+                }
+                
+                // Add the current option
+                string option = content.Substring(lastIndex, pipeIndex - lastIndex);
+                if (string.IsNullOrEmpty(option.Trim()))
+                {
+                    options.Add("<comment:empty>");
+                }
+                else
+                {
+                    // Recursively process the option to handle nested syntax
+                    options.Add(ProcessWildcardLine(option, task.Id));
+                }
+                
+                lastIndex = pipeIndex + 1;
+            }
+            
+            // Join with double pipes for SwarmUI alternate syntax
+            return $"<alternate:{string.Join("||", options)}>";
+        }
+
+        private string ProcessPromptEditing(string input, ProcessingTask task)
+        {
+            var result = new StringBuilder(input);
+            var startIndex = 0;
+            
+            while (true)
+            {
+                // Find the next bracket that could be prompt editing
+                var bracketStartIndex = result.ToString().IndexOf("[", startIndex, StringComparison.Ordinal);
+                if (bracketStartIndex == -1)
+                    break;
+                
+                // Check if this bracket is escaped
+                if (bracketStartIndex > 0 && result[bracketStartIndex - 1] == '\\')
+                {
+                    startIndex = bracketStartIndex + 1;
+                    continue;
+                }
+                
+                // Check if this bracket is part of SwarmUI syntax (inside < >)
+                if (IsInsideSwarmUITag(result.ToString(), bracketStartIndex))
+                {
+                    startIndex = bracketStartIndex + 1;
+                    continue;
+                }
+                
+                // Find the matching closing bracket
+                int closeBracketIndex = FindMatchingClosingSquareBracket(result.ToString(), bracketStartIndex);
+                
+                if (closeBracketIndex == -1)
+                {
+                    // No matching closing bracket found, move past this opening and continue
+                    startIndex = bracketStartIndex + 1;
+                    continue;
+                }
+                
+                // Extract the content inside the brackets (without the [])
+                string content = result.ToString().Substring(bracketStartIndex + 1, closeBracketIndex - bracketStartIndex - 1);
+                
+                // Check if this is prompt editing syntax: [from:to:step]
+                if (IsPromptEditingSyntax(content))
+                {
+                    // Process as prompt editing
+                    string replacement = ProcessPromptEditingContent(content, task);
+                    
+                    // Replace the entire prompt editing expression with the new format
+                    result.Remove(bracketStartIndex, closeBracketIndex - bracketStartIndex + 1);
+                    result.Insert(bracketStartIndex, replacement);
+                    
+                    // Update the start index for the next search
+                    startIndex = bracketStartIndex + replacement.Length;
+                }
+                else
+                {
+                    // Not prompt editing, skip this bracket
+                    startIndex = bracketStartIndex + 1;
+                }
+            }
+            
+            return result.ToString();
+        }
+        
+        /// <summary>
+        /// Checks if the content inside brackets matches prompt editing syntax: from:to:step
+        /// where step must be a valid number.
+        /// </summary>
+        /// <param name="content">The content inside the brackets.</param>
+        /// <returns>True if it's prompt editing syntax, false otherwise.</returns>
+        private bool IsPromptEditingSyntax(string content)
+        {
+            // Find colons at the top level (not inside nested structures)
+            char[] openChars = { '{', '[', '<' };
+            char[] closeChars = { '}', ']', '>' };
+            
+            var colonIndices = new List<int>();
+            int searchStart = 0;
+            
+            while (true)
+            {
+                int colonIndex = FindTopLevelChar(content, searchStart, ':', openChars, closeChars);
+                if (colonIndex == -1)
+                    break;
+                    
+                colonIndices.Add(colonIndex);
+                searchStart = colonIndex + 1;
+            }
+            
+            // Must have exactly 2 colons for prompt editing syntax [a:b:c]
+            // We don't validate what 'c' contains - let SwarmUI validate parameters at runtime
+            return colonIndices.Count == 2;
+        }
+        
+        /// <summary>
+        /// Processes prompt editing content and converts it to SwarmUI syntax.
+        /// </summary>
+        /// <param name="content">The content inside the brackets: from:to:step</param>
+        /// <param name="task">The processing task for context.</param>
+        /// <returns>The converted SwarmUI syntax: &lt;fromto[step]:from||to&gt;</returns>
+        private string ProcessPromptEditingContent(string content, ProcessingTask task)
+        {
+            // Find colons at the top level
+            char[] openChars = { '{', '[', '<' };
+            char[] closeChars = { '}', ']', '>' };
+            
+            var colonIndices = new List<int>();
+            int searchStart = 0;
+            
+            while (true)
+            {
+                int colonIndex = FindTopLevelChar(content, searchStart, ':', openChars, closeChars);
+                if (colonIndex == -1)
+                    break;
+                    
+                colonIndices.Add(colonIndex);
+                searchStart = colonIndex + 1;
+            }
+            
+            // Extract the three parts
+            string fromPart = content.Substring(0, colonIndices[0]);
+            string toPart = content.Substring(colonIndices[0] + 1, colonIndices[1] - colonIndices[0] - 1);
+            string stepPart = content.Substring(colonIndices[1] + 1);
+            
+            // Recursively process from, to, and step parts to handle nested syntax
+            string processedFrom = string.IsNullOrEmpty(fromPart.Trim()) ? "<comment:empty>" : ProcessWildcardLine(fromPart, task.Id);
+            string processedTo = string.IsNullOrEmpty(toPart.Trim()) ? "<comment:empty>" : ProcessWildcardLine(toPart, task.Id);
+            string processedStep = string.IsNullOrEmpty(stepPart.Trim()) ? "<comment:empty>" : ProcessWildcardLine(stepPart, task.Id);
+            
+            return $"<fromto[{processedStep}]:{processedFrom}||{processedTo}>";
+        }
+
+        private string ProcessNegativeAttention(string input, string taskId)
+        {
+            // Use a recursive approach to handle nested brackets properly
+            return ProcessNegativeAttentionRecursive(input, taskId);
+        }
+        
+        private string ProcessNegativeAttentionRecursive(string input, string taskId)
+        {
+            var result = new StringBuilder(input);
+            var startIndex = 0;
+            
+            while (true)
+            {
+                // Find the next negative attention pattern
+                var bracketStartIndex = result.ToString().IndexOf("[", startIndex, StringComparison.Ordinal);
+                if (bracketStartIndex == -1)
+                    break;
+                
+                // Check if this bracket is escaped
+                if (bracketStartIndex > 0 && result[bracketStartIndex - 1] == '\\')
+                {
+                    startIndex = bracketStartIndex + 1;
+                    continue;
+                }
+                
+                // Check if this bracket is part of SwarmUI syntax (inside < >)
+                if (IsInsideSwarmUITag(result.ToString(), bracketStartIndex))
+                {
+                    startIndex = bracketStartIndex + 1;
+                    continue;
+                }
+                
+                // Find the matching closing bracket for this level
+                int closeBracketIndex = FindMatchingClosingSquareBracket(result.ToString(), bracketStartIndex);
+                
+                if (closeBracketIndex == -1)
+                {
+                    // No matching closing bracket found, move past this opening and continue
+                    startIndex = bracketStartIndex + 1;
+                    continue;
+                }
+                
+                // Extract the content inside the brackets (without the [])
+                string content = result.ToString().Substring(bracketStartIndex + 1, closeBracketIndex - bracketStartIndex - 1);
+                
+                // Recursively process the content first to handle nested brackets
+                string processedContent = ProcessNegativeAttentionRecursive(content, taskId);
+                
+                // Then process wildcard constructs within the content
+                processedContent = ProcessWildcardLine(processedContent, taskId);
+                
+                // Calculate the weight - if already processed, compound it
+                double weight = 0.9;
+                string finalContent = processedContent;
+                
+                // Check if the processed content is already an attention specifier
+                var attentionMatch = System.Text.RegularExpressions.Regex.Match(processedContent, @"^\((.+?):([0-9.]+)\)$");
+                if (attentionMatch.Success)
+                {
+                    finalContent = attentionMatch.Groups[1].Value;
+                    if (double.TryParse(attentionMatch.Groups[2].Value, out double existingWeight))
+                    {
+                        weight = existingWeight * 0.9; // Compound the weight
+                    }
+                }
+                
+                // Transform to ComfyUI positive attention format
+                string replacement = $"({finalContent}:{weight:0.###})";
+                
+                // Replace the entire negative attention expression with the new format
+                result.Remove(bracketStartIndex, closeBracketIndex - bracketStartIndex + 1);
+                result.Insert(bracketStartIndex, replacement);
+                
+                // Update the start index for the next search
+                startIndex = bracketStartIndex + replacement.Length;
+            }
+            
+            return result.ToString();
+        }
+
+        /// <summary>
+        /// Checks if a bracket at the given index is inside a SwarmUI tag (between < and >).
+        /// </summary>
+        /// <param name="input">The input string.</param>
+        /// <param name="bracketIndex">The index of the bracket to check.</param>
+        /// <returns>True if the bracket is inside a SwarmUI tag, false otherwise.</returns>
+        private bool IsInsideSwarmUITag(string input, int bracketIndex)
+        {
+            // Track nesting level of angle brackets to properly handle nested SwarmUI tags
+            int angleDepth = 0;
+            
+            for (int i = 0; i < bracketIndex; i++)
+            {
+                if (input[i] == '<')
+                {
+                    angleDepth++;
+                }
+                else if (input[i] == '>')
+                {
+                    angleDepth--;
+                }
+            }
+            
+            // If angleDepth > 0, we're inside SwarmUI tags
+            return angleDepth > 0;
+        }
+
+        /// <summary>
+        /// Finds the matching closing square bracket for an opening bracket at the specified index.
+        /// Handles nested square brackets properly by counting bracket depth.
+        /// </summary>
+        /// <param name="input">The input string.</param>
+        /// <param name="openBracketIndex">The index of the opening square bracket.</param>
+        /// <returns>The index of the matching closing square bracket, or -1 if not found.</returns>
+        private int FindMatchingClosingSquareBracket(string input, int openBracketIndex)
+        {
+            return FindMatchingClosingBracket(input, openBracketIndex, '[', ']');
+        }
+        
+        /// <summary>
+        /// Generic method to find matching closing bracket/brace for any bracket type.
+        /// Handles nested brackets properly by counting bracket depth and respects escaped characters.
+        /// </summary>
+        /// <param name="input">The input string.</param>
+        /// <param name="openIndex">The index of the opening bracket.</param>
+        /// <param name="openChar">The opening bracket character.</param>
+        /// <param name="closeChar">The closing bracket character.</param>
+        /// <returns>The index of the matching closing bracket, or -1 if not found.</returns>
+        private int FindMatchingClosingBracket(string input, int openIndex, char openChar, char closeChar)
+        {
+            int bracketLevel = 1;
+            
+            for (int i = openIndex + 1; i < input.Length; i++)
+            {
+                // Check if this bracket is escaped
+                if (i > 0 && input[i - 1] == '\\')
+                    continue;
+                    
+                if (input[i] == openChar)
+                {
+                    bracketLevel++;
+                }
+                else if (input[i] == closeChar)
+                {
+                    bracketLevel--;
+                    if (bracketLevel == 0)
+                    {
+                        return i;
+                    }
+                }
+            }
+            
+            return -1;
+        }
+        
+        /// <summary>
+        /// Finds the index of the next unescaped character at the top nesting level.
+        /// </summary>
+        /// <param name="input">The input string.</param>
+        /// <param name="startIndex">The index to start searching from.</param>
+        /// <param name="targetChar">The character to find.</param>
+        /// <param name="openChars">Array of opening bracket characters to track nesting.</param>
+        /// <param name="closeChars">Array of closing bracket characters to track nesting.</param>
+        /// <returns>The index of the target character at top level, or -1 if not found.</returns>
+        private int FindTopLevelChar(string input, int startIndex, char targetChar, char[] openChars, char[] closeChars)
+        {
+            int[] nestingLevels = new int[openChars.Length];
+            
+            for (int i = startIndex; i < input.Length; i++)
+            {
+                // Check if this character is escaped
+                if (i > 0 && input[i - 1] == '\\')
+                    continue;
+                
+                char c = input[i];
+                
+                // Update nesting levels
+                for (int j = 0; j < openChars.Length; j++)
+                {
+                    if (c == openChars[j])
+                    {
+                        nestingLevels[j]++;
+                    }
+                    else if (c == closeChars[j])
+                    {
+                        nestingLevels[j]--;
+                    }
+                }
+                
+                // Check if we found the target character at top level
+                if (c == targetChar && nestingLevels.All(level => level == 0))
+                {
+                    return i;
+                }
+            }
+            
+            return -1;
         }
 
         private string ProcessVariants(string input, ProcessingTask task)
@@ -485,23 +1235,7 @@ namespace Spoomples.Extensions.WildcardImporter
         /// <returns>The index of the matching closing brace, or -1 if not found.</returns>
         private int FindMatchingClosingBrace(string input, int openBraceIndex)
         {
-            int braceLevel = 1;
-            
-            for (int i = openBraceIndex + 1; i < input.Length; i++)
-            {
-                if (input[i] == '{')
-                    braceLevel++;
-                else if (input[i] == '}')
-                {
-                    braceLevel--;
-                    if (braceLevel == 0)
-                    {
-                        return i;
-                    }
-                }
-            }
-            
-            return -1;
+            return FindMatchingClosingBracket(input, openBraceIndex, '{', '}');
         }
 
         /// <summary>
@@ -520,7 +1254,7 @@ namespace Spoomples.Extensions.WildcardImporter
             else
             {
                 // Simple variant without quantifier
-                return ProcessVariantOptions(content, "");
+                return ProcessVariantOptions(content, "", task);
             }
         }
 
@@ -533,19 +1267,33 @@ namespace Spoomples.Extensions.WildcardImporter
         private string ProcessQuantifierVariant(string content, string fullMatch, ProcessingTask task)
         {
             // Try to match the quantifier pattern
-            var match = System.Text.RegularExpressions.Regex.Match(content, @"^((?:\d+-\d+|-\d+|\d+-|\d+))\$\$(.*?)(?:\$\$)?(.*)$");
+            // Pattern handles: 2$$options or 2$$separator$$options
+            var match = System.Text.RegularExpressions.Regex.Match(content, @"^((?:\d+-\d+|-\d+|\d+-|\d+))\$\$(.*)$");
+            
+            Logs.Debug($"WildcardProcessor: Regex match success={match.Success}");
             
             if (match.Success)
             {
                 string quantifierSpec = "";
                 string numberPart = match.Groups[1].Value;
-                string customSeparator = match.Groups[2].Value;
-                string optionsPart = match.Groups[3].Value;
+                string remainingPart = match.Groups[2].Value;
                 
-                // Log warning if custom separator is found
-                if (!string.IsNullOrEmpty(customSeparator))
+                // Check if there's a custom separator (pattern: separator$$options)
+                // But ignore $$ inside nested structures like <wildcard:...> or {...}
+                string customSeparator = "";
+                string optionsPart = remainingPart;
+                
+                int separatorIndex = FindCustomSeparatorIndex(remainingPart);
+                if (separatorIndex >= 0)
                 {
-                    task.AddWarning($"Custom separator in variant not supported: {fullMatch}");
+                    customSeparator = remainingPart.Substring(0, separatorIndex);
+                    optionsPart = remainingPart.Substring(separatorIndex + 2); // Skip the $$
+                    
+                    // Log warning if custom separator is found
+                    if (!string.IsNullOrEmpty(customSeparator))
+                    {
+                        task.AddWarning($"Custom separator in variant not supported: {fullMatch}");
+                    }
                 }
                 
                 // Handle ranges
@@ -559,12 +1307,24 @@ namespace Spoomples.Extensions.WildcardImporter
                     quantifierSpec = $"[{numberPart},]";
                 }
                 
-                return ProcessVariantOptions(optionsPart, quantifierSpec);
+                // Special case: Single wildcard with quantifier should become <wcwildcard[quantifier]:name>
+                // Example: {2$$__flavours__} should become <wcwildcard[2,]:flavours> not <random[2,]:<wcwildcard:flavours>>
+                Logs.Debug($"WildcardProcessor: Checking single wildcard for optionsPart='{optionsPart}'");
+                if (IsSingleWildcard(optionsPart))
+                {
+                    string wildcardName = ExtractWildcardName(optionsPart);
+                    string result = $"<wcwildcard{quantifierSpec}:{wildcardName}>";
+                    Logs.Debug($"WildcardProcessor: Single wildcard detected, returning '{result}'");
+                    return result;
+                }
+                Logs.Debug($"WildcardProcessor: Not a single wildcard, proceeding with normal variant processing");
+                
+                return ProcessVariantOptions(optionsPart, quantifierSpec, task);
             }
             else
             {
                 // If it doesn't match the quantifier pattern, treat it as a simple variant
-                return ProcessVariantOptions(content, "");
+                return ProcessVariantOptions(content, "", task);
             }
         }
 
@@ -600,18 +1360,22 @@ namespace Spoomples.Extensions.WildcardImporter
         private string ProcessWildcardRef(string quantityString, string reference, string taskId)
         {
             var task = _tasks[taskId];
+            
+            // Recursively process the reference to handle nested syntax like ${variable}
+            string processedReference = ProcessWildcardLine(reference, taskId);
+            
             // Check if reference contains glob patterns (* or **)
-            if (reference.Contains('*'))
+            if (processedReference.Contains('*'))
             {
-                return ProcessGlobWildcardRef(quantityString, reference, taskId);
+                return ProcessGlobWildcardRef(quantityString, processedReference, taskId);
             }
             
             // Standard non-glob reference
             if (string.IsNullOrEmpty(quantityString))
             {
-                return $"<wildcard:{task.Prefix + reference}>";
+                return $"<wcwildcard:{task.Prefix + processedReference}>";
             }
-            return $"<wildcard[{quantityString}]:{task.Prefix + reference}>";
+            return $"<wcwildcard[{quantityString}]:{task.Prefix + processedReference}>";
         }
         
         private string ProcessGlobWildcardRef(string quantityString, string reference, string taskId)
@@ -625,30 +1389,30 @@ namespace Spoomples.Extensions.WildcardImporter
             {
                 task.AddWarning($"No matches found for glob pattern: {reference}");
                 // Return the original reference in a way that shows it's a failed glob
-                return $"<wildcard:{task.Prefix + reference}><comment:no glob matches>";
+                return $"<wcwildcard:{task.Prefix + reference}><comment:no glob matches>";
             }
             
-            // Convert to a <random> tag with multiple <wildcard> entries
+            // Convert to a <wcrandom> tag with multiple <wcwildcard> entries
             if (matchingPaths.Count == 1)
             {
                 // Only one match, no need for random
                 string path = matchingPaths.First();
                 if (string.IsNullOrEmpty(quantityString))
                 {
-                    return $"<wildcard:{task.Prefix + path}>";
+                    return $"<wcwildcard:{task.Prefix + path}>";
                 }
-                return $"<wildcard[{quantityString},]:{task.Prefix + path}>";
+                return $"<wcwildcard[{quantityString},]:{task.Prefix + path}>";
             }
             
-            // Build a <random> tag with all matches
+            // Build a <wcrandom> tag with all matches
             var quantitySpec = string.IsNullOrEmpty(quantityString) ? "" : $"[{quantityString},]";
             StringBuilder result = new StringBuilder();
-            result.Append($"<random{quantitySpec}:");
+            result.Append($"<wcrandom{quantitySpec}:");
             
             for (int i = 0; i < matchingPaths.Count; i++)
             {
                 string path = matchingPaths[i];
-                result.Append($"<wildcard:{task.Prefix + path}>");
+                result.Append($"<wcwildcard:{task.Prefix + path}>");
                 if (i < matchingPaths.Count - 1)
                 {
                     result.Append("|");
@@ -711,43 +1475,33 @@ namespace Spoomples.Extensions.WildcardImporter
             return Regex.IsMatch(path, $"^{regexPattern}$", RegexOptions.IgnoreCase);
         }
 
-        private string ProcessVariantOptions(string optionsPart, string quantifierSpec)
+        private string ProcessVariantOptions(string optionsPart, string quantifierSpec, ProcessingTask task)
         {
             string[] options = optionsPart.Split('|');
             
-            // Check if we have weighted options
-            bool hasWeightedOptions = false;
-            foreach (string option in options)
-            {
-                if (option.Contains("::") && option.IndexOf("::", StringComparison.Ordinal) > 0)
-                {
-                    string weightPart = option.Substring(0, option.IndexOf("::", StringComparison.Ordinal));
-                    if (double.TryParse(weightPart, out _))
-                    {
-                        hasWeightedOptions = true;
-                        break;
-                    }
-                }
-            }
-            
-            if (hasWeightedOptions)
-            {
-                var weightedOptions = ProcessWeightedOptions(options);
-                return $"<random{quantifierSpec}:{string.Join("|", weightedOptions)}>";
-            }
-            
-            // Handle empty options
+            // Handle empty options and recursively process each option
             for (int i = 0; i < options.Length; i++)
             {
                 if (string.IsNullOrEmpty(options[i]))
                 {
                     options[i] = "<comment:empty>";
                 }
+                else
+                {
+                    // Recursively process each option to handle nested syntax
+                    options[i] = ProcessWildcardLine(options[i], task.Id);
+                    // if option is weighted and has leading spaces, then trim the leading spaces
+                    if (Regex.Match(options[i], @"^\s+\d*(\.\d+)?::").Success)
+                    {
+                        options[i] = options[i].TrimStart();
+                    }
+                }
             }
 
             if (quantifierSpec == "" && options.Length == 1)
             {
-                return options[0];
+                // strip any weight from the option
+                return Regex.Replace(options[0], @"^\s*\d*(\.\d+)?::", "");
             }
 
             if (quantifierSpec == "" && options.Length == 0)
@@ -755,105 +1509,105 @@ namespace Spoomples.Extensions.WildcardImporter
                 return "";
             }
 
-            return $"<random{quantifierSpec}:{string.Join("|", options)}>";
+            // Use wcrandom which supports native weighted options (weight::option syntax)
+            // No need to expand weighted options - wcrandom handles them directly
+            return $"<wcrandom{quantifierSpec}:{string.Join("|", options)}>";
         }
         
-        private string[] ProcessWeightedOptions(string[] options)
+
+        /// <summary>
+        /// Finds the index of a custom separator $$ that is not inside nested structures.
+        /// </summary>
+        /// <param name="text">The text to search in.</param>
+        /// <returns>The index of the custom separator, or -1 if not found.</returns>
+        private int FindCustomSeparatorIndex(string text)
         {
-            var result = new List<string>();
-            var weights = new List<double>();
-            var unweightedOptions = new List<string>();
+            int braceDepth = 0;
+            int angleDepth = 0;
             
-            // Extract weights and options
-            foreach (var option in options)
+            for (int i = 0; i < text.Length - 1; i++)
             {
-                if (option.Contains("::") && option.IndexOf("::", StringComparison.Ordinal) > 0)
+                char c = text[i];
+                
+                // Track nesting depth
+                if (c == '{') braceDepth++;
+                else if (c == '}') braceDepth--;
+                else if (c == '<') angleDepth++;
+                else if (c == '>') angleDepth--;
+                
+                // Check for $$ only when we're not inside nested structures
+                if (c == '$' && text[i + 1] == '$' && braceDepth == 0 && angleDepth == 0)
                 {
-                    string weightPart = option.Substring(0, option.IndexOf("::", StringComparison.Ordinal));
-                    string valuePart = option.Substring(option.IndexOf("::", StringComparison.Ordinal) + 2);
-                    
-                    if (double.TryParse(weightPart, out double weight))
-                    {
-                        weights.Add(weight);
-                        unweightedOptions.Add(string.IsNullOrEmpty(valuePart) ? "<comment:empty>" : valuePart);
-                    }
-                    else
-                    {
-                        // If parsing fails, treat as unweighted
-                        weights.Add(1.0);
-                        unweightedOptions.Add(string.IsNullOrEmpty(option) ? "<comment:empty>" : option);
-                    }
-                }
-                else
-                {
-                    weights.Add(1.0);
-                    unweightedOptions.Add(string.IsNullOrEmpty(option) ? "<comment:empty>" : option);
+                    return i;
                 }
             }
             
-            // If all weights are 1.0, no need for special processing
-            if (weights.All(w => Math.Abs(w - 1.0) < 0.001))
-            {
-                return unweightedOptions.ToArray();
-            }
-            
-            // Calculate multiplier to get integer weights
-            double multiplier = 1.0;
-            foreach (var weight in weights)
-            {
-                var fractionalPart = weight - Math.Floor(weight);
-                if (fractionalPart > 0)
-                {
-                    // Find multiplier that makes all weights integers
-                    int precision = (int)Math.Pow(10, fractionalPart.ToString().TrimStart('0', '.').Length);
-                    multiplier = Math.Max(multiplier, precision);
-                }
-            }
-            
-            // Convert to integer weights
-            List<int> intWeights = weights.Select(w => (int)Math.Round(w * multiplier)).ToList();
-            
-            // Find GCD for all weights
-            int gcd = intWeights.Count > 0 ? intWeights[0] : 1;
-            for (int i = 1; i < intWeights.Count; i++)
-            {
-                gcd = GCD(gcd, intWeights[i]);
-            }
-            
-            // Calculate normalized weights
-            var normalizedWeights = intWeights.Select(w => w / gcd).ToList();
-            
-            // Create duplicated options according to weights
-            for (int i = 0; i < unweightedOptions.Count; i++)
-            {
-                for (int j = 0; j < normalizedWeights[i]; j++)
-                {
-                    result.Add(unweightedOptions[i]);
-                }
-            }
-            
-            return result.ToArray();
+            return -1; // No custom separator found
         }
-        
-        private int GCD(int a, int b)
+
+        /// <summary>
+        /// Checks if the options part contains only a single wildcard (no | separators at the top level).
+        /// A single wildcard can be simple like <wildcard:name> or complex like <wildcard:<random[1,]:cat|dog>s>.
+        /// </summary>
+        /// <param name="optionsPart">The options part to check.</param>
+        /// <returns>True if it's a single wildcard, false otherwise.</returns>
+        private bool IsSingleWildcard(string optionsPart)
         {
-            while (b != 0)
+            if (string.IsNullOrEmpty(optionsPart))
             {
-                int temp = b;
-                b = a % b;
-                a = temp;
+                return false;
             }
-            return a;
+            
+            string trimmed = optionsPart.Trim();
+            
+            // Must start with <wcwildcard: and end with >
+            if (!trimmed.StartsWith("<wcwildcard:") || !trimmed.EndsWith(">"))
+            {
+                return false;
+            }
+            
+            // Check if there are any | separators at the top level (not inside nested structures)
+            return !HasTopLevelPipeSeparators(trimmed);
         }
-        
-        private int GCD(int a, int b, params int[] numbers)
+
+        /// <summary>
+        /// Checks if a string has pipe separators at the top level (not inside nested structures).
+        /// </summary>
+        /// <param name="text">The text to check.</param>
+        /// <returns>True if there are top-level pipe separators, false otherwise.</returns>
+        private bool HasTopLevelPipeSeparators(string text)
         {
-            int result = GCD(a, b);
-            foreach (int number in numbers)
+            int braceDepth = 0;
+            int angleDepth = 0;
+            
+            foreach (char c in text)
             {
-                result = GCD(result, number);
+                if (c == '{') braceDepth++;
+                else if (c == '}') braceDepth--;
+                else if (c == '<') angleDepth++;
+                else if (c == '>') angleDepth--;
+                else if (c == '|' && braceDepth == 0 && angleDepth == 0)
+                {
+                    return true; // Found a top-level pipe separator
+                }
             }
-            return result;
+            
+            return false;
+        }
+
+        /// <summary>
+        /// Extracts the wildcard name from a processed wildcard pattern (removes the <wcwildcard: and > delimiters).
+        /// </summary>
+        /// <param name="wildcardOption">The wildcard option like <wcwildcard:flavours> or <wcwildcard:<random[1,]:cat|dog>s>.</param>
+        /// <returns>The wildcard name like flavours or <random[1,]:cat|dog>s.</returns>
+        private string ExtractWildcardName(string wildcardOption)
+        {
+            string trimmed = wildcardOption.Trim();
+            if (trimmed.StartsWith("<wcwildcard:") && trimmed.EndsWith(">") && trimmed.Length > 13)
+            {
+                return trimmed.Substring(12, trimmed.Length - 13);
+            }
+            return wildcardOption; // Fallback, should not happen if IsSingleWildcard returned true
         }
 
         public ProgressStatus GetStatus(string taskId)
@@ -945,6 +1699,672 @@ namespace Spoomples.Extensions.WildcardImporter
 
             return newPath;
         }
+
+        /// <summary>
+        /// Processes long-form echo commands in the input line.
+        /// Supports: <ppp:echo varname> and <ppp:echo varname>default<ppp:/echo>
+        /// Note: Short-form ${varname:default} syntax is handled by ProcessVariables method
+        /// </summary>
+        /// <param name="line">The input line to process.</param>
+        /// <param name="task">The current processing task.</param>
+        /// <returns>The processed line with echo commands converted to appropriate directives.</returns>
+        private string ProcessEchoCommands(string line, ProcessingTask task)
+        {
+            // Process long-form echo commands: <ppp:echo varname> and <ppp:echo varname>default<ppp:/echo>
+            return ProcessLongFormEchoCommands(line, task);
+        }
+
+        /// <summary>
+        /// Processes long-form echo commands: <ppp:echo varname> and <ppp:echo varname>default<ppp:/echo>
+        /// </summary>
+        private string ProcessLongFormEchoCommands(string line, ProcessingTask task)
+        {
+            // First process <ppp:echo varname>default<ppp:/echo> (with default)
+            // Use a more careful pattern that handles nested content properly
+            var echoWithDefaultPattern = @"<ppp:echo\s+([^>\s]+?)\s*>([\s\S]*?)<ppp:/echo>";
+            line = Regex.Replace(line, echoWithDefaultPattern, match =>
+            {
+                string varName = match.Groups[1].Value.Trim();
+                string defaultValue = match.Groups[2].Value;
+                
+                // Check for malformed cases (empty variable name)
+                if (string.IsNullOrWhiteSpace(varName))
+                {
+                    return match.Value; // Return original malformed syntax
+                }
+                
+                // If default is empty, just return <macro:varname>
+                if (string.IsNullOrEmpty(defaultValue))
+                {
+                    return $"<macro:{varName}>";
+                }
+                
+                // Process the default value recursively to handle nested syntax
+                string processedDefault = ProcessWildcardLine(defaultValue, task.Id);
+                
+                // Return wcmatch with condition for empty variable and else clause
+                return $"<wcmatch:<wccase[length({varName}) == 0]:{processedDefault}><wccase:<macro:{varName}>>>";
+            }, RegexOptions.IgnoreCase);
+            
+            // Then process <ppp:echo varname> (without default) - only if not already processed
+            var echoWithoutDefaultPattern = @"<ppp:echo\s+([^>\s]+?)\s*>(?!.*<ppp:/echo>)";
+            line = Regex.Replace(line, echoWithoutDefaultPattern, match =>
+            {
+                string varName = match.Groups[1].Value.Trim();
+                
+                // Check for malformed cases (empty variable name)
+                if (string.IsNullOrWhiteSpace(varName))
+                {
+                    return match.Value; // Return original malformed syntax
+                }
+                
+                return $"<macro:{varName}>";
+            }, RegexOptions.IgnoreCase);
+            
+            return line;
+        }
+
+        /// <summary>
+        /// Processes if commands: <ppp:if condition>content<ppp:elif condition>content<ppp:else>content<ppp:/if>
+        /// Converts them to wcmatch/wccase directives with proper expression syntax.
+        /// </summary>
+        /// <param name="line">The input line to process.</param>
+        /// <param name="task">The current processing task.</param>
+        /// <returns>The processed line with if commands converted to appropriate directives.</returns>
+        private string ProcessIfCommands(string line, ProcessingTask task)
+        {
+            // Use manual parsing to handle nested if statements properly
+            string result = line;
+            int startIndex = 0;
+            
+            while (true)
+            {
+                // Find the next if statement
+                int ifStart = result.IndexOf("<ppp:if ", startIndex, StringComparison.OrdinalIgnoreCase);
+                if (ifStart == -1)
+                    break;
+                    
+                // Find the end of the opening tag
+                int tagEnd = result.IndexOf('>', ifStart);
+                if (tagEnd == -1)
+                    break;
+                    
+                // Extract the condition
+                string condition = result.Substring(ifStart + 8, tagEnd - ifStart - 8).Trim();
+                
+                // Find the matching closing tag using manual counting
+                int contentStart = tagEnd + 1;
+                int depth = 1;
+                int pos = contentStart;
+                
+                while (pos < result.Length && depth > 0)
+                {
+                    int nextIf = result.IndexOf("<ppp:if ", pos, StringComparison.OrdinalIgnoreCase);
+                    int nextEndIf = result.IndexOf("<ppp:/if>", pos, StringComparison.OrdinalIgnoreCase);
+                    
+                    if (nextEndIf == -1)
+                        break; // Malformed - no closing tag
+                        
+                    if (nextIf != -1 && nextIf < nextEndIf)
+                    {
+                        // Found nested if before closing tag
+                        depth++;
+                        pos = nextIf + 8;
+                    }
+                    else
+                    {
+                        // Found closing tag
+                        depth--;
+                        if (depth == 0)
+                        {
+                            // This is our matching closing tag
+                            string content = result.Substring(contentStart, nextEndIf - contentStart);
+                            string fullMatch = result.Substring(ifStart, nextEndIf + 9 - ifStart);
+                            
+                            try
+                            {
+                                string replacement = ProcessIfStructure(condition, content, task, fullMatch);
+                                result = result.Substring(0, ifStart) + replacement + result.Substring(nextEndIf + 9);
+                                startIndex = ifStart + replacement.Length;
+                                break;
+                            }
+                            catch (Exception ex)
+                            {
+                                task.AddWarning($"Error processing if command: {ex.Message}");
+                                startIndex = nextEndIf + 9;
+                                break;
+                            }
+                        }
+                        else
+                        {
+                            pos = nextEndIf + 9;
+                        }
+                    }
+                }
+                
+                if (depth > 0)
+                {
+                    // Malformed - no matching closing tag found
+                    task.AddWarning("Malformed if command: no matching closing tag");
+                    break;
+                }
+            }
+            
+            return result;
+        }
+
+        /// <summary>
+        /// Processes the full if/elif/else structure and converts it to wcmatch/wccase syntax.
+        /// </summary>
+        private string ProcessIfStructure(string initialCondition, string content, ProcessingTask task, string originalMatch)
+        {
+            var cases = new List<string>();
+            
+            // Parse the content to extract elif and else clauses
+            var parts = ParseIfContent(content);
+            
+            // Add the initial if condition
+            string processedCondition = ProcessCondition(initialCondition, task);
+            if (processedCondition == null)
+            {
+                // Return original text if condition parsing failed
+                return originalMatch;
+            }
+            
+            string processedContent = parts.IfContent;
+            if (string.IsNullOrEmpty(processedContent))
+            {
+                processedContent = "<comment:empty>";
+            }
+            else
+            {
+                // Recursively process content to handle nested structures
+                processedContent = ProcessWildcardLine(processedContent, task.Id);
+            }
+            
+            cases.Add($"<wccase[{processedCondition}]:{processedContent}>");
+            
+            // Add elif clauses
+            foreach (var elifPart in parts.ElifParts)
+            {
+                string elifCondition = ProcessCondition(elifPart.Condition, task);
+                if (elifCondition != null)
+                {
+                    string elifContent = string.IsNullOrEmpty(elifPart.Content) ? "<comment:empty>" : ProcessWildcardLine(elifPart.Content, task.Id);
+                    cases.Add($"<wccase[{elifCondition}]:{elifContent}>");
+                }
+            }
+            
+            // Add else clause if present
+            if (parts.ElseContent != null)
+            {
+                string elseContent = string.IsNullOrEmpty(parts.ElseContent) ? "<comment:empty>" : ProcessWildcardLine(parts.ElseContent, task.Id);
+                cases.Add($"<wccase:{elseContent}>");
+            }
+            
+            return $"<wcmatch:{string.Join("", cases)}>";
+        }
+
+        /// <summary>
+        /// Parses the content of an if block to extract elif and else clauses.
+        /// </summary>
+        private IfParts ParseIfContent(string content)
+        {
+            var result = new IfParts();
+            var elifParts = new List<ElifPart>();
+            
+            // Find elif and else tags
+            var elifPattern = @"<ppp:elif\s+([^>]+?)>";
+            var elsePattern = @"<ppp:else>";
+            
+            var elifMatches = Regex.Matches(content, elifPattern, RegexOptions.IgnoreCase);
+            var elseMatch = Regex.Match(content, elsePattern, RegexOptions.IgnoreCase);
+            
+            int currentIndex = 0;
+            
+            // Extract content before first elif or else
+            int nextIndex = content.Length;
+            if (elifMatches.Count > 0)
+                nextIndex = Math.Min(nextIndex, elifMatches[0].Index);
+            if (elseMatch.Success)
+                nextIndex = Math.Min(nextIndex, elseMatch.Index);
+                
+            result.IfContent = content.Substring(currentIndex, nextIndex - currentIndex);
+            currentIndex = nextIndex;
+            
+            // Process elif clauses
+            for (int i = 0; i < elifMatches.Count; i++)
+            {
+                var elifMatch = elifMatches[i];
+                string condition = elifMatch.Groups[1].Value.Trim();
+                
+                // Find start of content (after the elif tag)
+                int contentStart = elifMatch.Index + elifMatch.Length;
+                
+                // Find end of content (before next elif or else)
+                int contentEnd = content.Length;
+                if (i + 1 < elifMatches.Count)
+                    contentEnd = Math.Min(contentEnd, elifMatches[i + 1].Index);
+                if (elseMatch.Success)
+                    contentEnd = Math.Min(contentEnd, elseMatch.Index);
+                
+                string elifContent = content.Substring(contentStart, contentEnd - contentStart);
+                elifParts.Add(new ElifPart { Condition = condition, Content = elifContent });
+            }
+            
+            result.ElifParts = elifParts;
+            
+            // Process else clause
+            if (elseMatch.Success)
+            {
+                int elseStart = elseMatch.Index + elseMatch.Length;
+                result.ElseContent = content.Substring(elseStart);
+            }
+            
+            return result;
+        }
+
+        /// <summary>
+        /// Processes a condition expression and converts it to wccase syntax.
+        /// </summary>
+        private string ProcessCondition(string condition, ProcessingTask task)
+        {
+            condition = condition.Trim();
+            
+            if (string.IsNullOrWhiteSpace(condition))
+                return null;
+            
+            // Check for simple variable truthiness (no operators)
+            if (!Regex.IsMatch(condition, @"\s+(eq|ne|gt|lt|ge|le|contains|in|not)\s+", RegexOptions.IgnoreCase))
+            {
+                return condition; // Simple variable check
+            }
+            
+            // Parse condition with operators (allow hyphens, underscores in variable names)
+            var conditionMatch = Regex.Match(condition, 
+                @"^\s*([\w\-]+)\s+(not\s+)?(eq|ne|gt|lt|ge|le|contains|in)\s+(.+?)\s*$", 
+                RegexOptions.IgnoreCase);
+                
+            if (!conditionMatch.Success)
+            {
+                task.AddWarning($"Could not parse condition: {condition}");
+                return null;
+            }
+            
+            string variable = conditionMatch.Groups[1].Value;
+            bool isNot = conditionMatch.Groups[2].Success;
+            string operation = conditionMatch.Groups[3].Value.ToLowerInvariant();
+            string value = conditionMatch.Groups[4].Value.Trim();
+            
+            // Validate operation
+            var validOperations = new[] { "eq", "ne", "gt", "lt", "ge", "le", "contains", "in" };
+            if (!validOperations.Contains(operation))
+            {
+                task.AddWarning($"Could not parse condition: {condition}");
+                return null;
+            }
+            
+            // Validate parentheses matching for list operations
+            if (value.Contains("(") || value.Contains(")"))
+            {
+                int openCount = value.Count(c => c == '(');
+                int closeCount = value.Count(c => c == ')');
+                if (openCount != closeCount)
+                {
+                    task.AddWarning($"Could not parse condition: {condition}");
+                    return null;
+                }
+            }
+            
+            // Convert operation to wccase syntax
+            string wcaseExpression = ConvertOperationToWcaseExpression(variable, operation, value, isNot, task);
+            
+            return wcaseExpression;
+        }
+
+        /// <summary>
+        /// Converts an operation to wccase expression syntax.
+        /// </summary>
+        private string ConvertOperationToWcaseExpression(string variable, string operation, string value, bool isNot, ProcessingTask task)
+        {
+            
+            // Check if value is a list (parentheses)
+            if (value.StartsWith("(") && value.EndsWith(")"))
+            {
+                string listContent = value.Substring(1, value.Length - 2);
+                var values = ParseValueList(listContent);
+                
+                if (values.Count == 1)
+                {
+                    // Single value in parentheses, treat as single value
+                    return ConvertSingleValueOperation(variable, operation, values[0], isNot);
+                }
+                else
+                {
+                    // Multiple values, convert to OR/AND chain
+                    return ConvertListOperation(variable, operation, values, isNot);
+                }
+            }
+            else
+            {
+                // Single value operation
+                return ConvertSingleValueOperation(variable, operation, value, isNot);
+            }
+        }
+
+        /// <summary>
+        /// Converts a single value operation to wccase syntax.
+        /// </summary>
+        private string ConvertSingleValueOperation(string variable, string operation, string value, bool isNot)
+        {
+            switch (operation.ToLowerInvariant())
+            {
+                case "eq":
+                    return isNot ? $"{variable} ~= {value}" : $"{variable} == {value}";
+                case "ne":
+                    return isNot ? $"{variable} == {value}" : $"{variable} ~= {value}";
+                case "gt":
+                    return isNot ? $"~({variable} > {value})" : $"{variable} > {value}";
+                case "lt":
+                    return isNot ? $"~({variable} < {value})" : $"{variable} < {value}";
+                case "ge":
+                    return isNot ? $"~({variable} >= {value})" : $"{variable} >= {value}";
+                case "le":
+                    return isNot ? $"~({variable} <= {value})" : $"{variable} <= {value}";
+                case "contains":
+                    return isNot ? $"~contains({variable}, {value})" : $"contains({variable}, {value})";
+                case "in":
+                    return isNot ? $"~({variable} == {value})" : $"{variable} == {value}";
+                default:
+                    // Return as-is for unknown operations
+                    return $"{variable} {operation} {value}";
+            }
+        }
+
+        /// <summary>
+        /// Converts a list operation to wccase syntax with OR/AND chains.
+        /// </summary>
+        private string ConvertListOperation(string variable, string operation, List<string> values, bool isNot)
+        {
+            var expressions = new List<string>();
+            
+            foreach (string value in values)
+            {
+                switch (operation.ToLowerInvariant())
+                {
+                    case "contains":
+                        expressions.Add($"contains({variable}, {value})");
+                        break;
+                    case "in":
+                        expressions.Add($"{variable} == {value}");
+                        break;
+                    default:
+                        throw new InvalidOperationException($"Operation '{operation}' not supported with lists");
+                }
+            }
+            
+            string joinOperator;
+            if (isNot)
+            {
+                // For NOT operations, we need AND (De Morgan's law: not (A or B) = (not A) and (not B))
+                if (operation.ToLowerInvariant() == "contains")
+                {
+                    expressions = expressions.Select(expr => $"~{expr}").ToList();
+                    joinOperator = " && ";
+                }
+                else // in
+                {
+                    expressions = expressions.Select(expr => expr.Replace("==", "~=")).ToList();
+                    joinOperator = " && ";
+                }
+            }
+            else
+            {
+                // For normal operations, we use OR
+                joinOperator = " || ";
+            }
+            
+            return string.Join(joinOperator, expressions);
+        }
+
+        /// <summary>
+        /// Parses a comma-separated list of values, preserving quotes and handling escaping.
+        /// </summary>
+        private List<string> ParseValueList(string listContent)
+        {
+            var values = new List<string>();
+            var currentValue = new StringBuilder();
+            bool inQuotes = false;
+            char quoteChar = '"';
+            
+            for (int i = 0; i < listContent.Length; i++)
+            {
+                char c = listContent[i];
+                
+                if (!inQuotes && (c == '"' || c == '\''))
+                {
+                    inQuotes = true;
+                    quoteChar = c;
+                    currentValue.Append(c);
+                }
+                else if (inQuotes && c == quoteChar)
+                {
+                    inQuotes = false;
+                    currentValue.Append(c);
+                }
+                else if (!inQuotes && c == ',')
+                {
+                    values.Add(currentValue.ToString().Trim());
+                    currentValue.Clear();
+                }
+                else
+                {
+                    currentValue.Append(c);
+                }
+            }
+            
+            // Add the last value
+            if (currentValue.Length > 0)
+            {
+                values.Add(currentValue.ToString().Trim());
+            }
+            
+            return values;
+        }
+
+        /// <summary>
+        /// Helper class to hold parsed if structure parts.
+        /// </summary>
+        private class IfParts
+        {
+            public string IfContent { get; set; }
+            public List<ElifPart> ElifParts { get; set; } = new List<ElifPart>();
+            public string ElseContent { get; set; }
+        }
+
+        /// <summary>
+        /// Helper class to hold elif clause information.
+        /// </summary>
+        private class ElifPart
+        {
+            public string Condition { get; set; }
+            public string Content { get; set; }
+        }
+
+        #region STN Command Processing
+
+        /// <summary>
+        /// Processes STN (Send To Negative) commands and converts them to wcnegative directives.
+        /// Handles position arguments (s/e/pN) and insertion point markers (iN).
+        /// </summary>
+        /// <param name="line">The input line to process.</param>
+        /// <param name="task">The current processing task.</param>
+        /// <returns>The processed line with STN commands converted to wcnegative directives.</returns>
+        private string ProcessStnCommands(string line, ProcessingTask task)
+        {
+            string result = line;
+            
+            // First, handle insertion point markers (iN) - remove them with warnings
+            result = ProcessStnInsertionMarkers(result, task);
+            
+            // Then process STN commands with manual parsing to handle nested structures
+            int startIndex = 0;
+            
+            while (true)
+            {
+                // Find the next STN command
+                int stnStart = result.IndexOf("<ppp:stn", startIndex, StringComparison.OrdinalIgnoreCase);
+                if (stnStart == -1)
+                    break;
+                    
+                // Find the end of the opening tag
+                int tagEnd = result.IndexOf('>', stnStart);
+                if (tagEnd == -1)
+                    break;
+                    
+                // Extract the position argument (if any)
+                string positionArg = "";
+                int spaceIndex = result.IndexOf(' ', stnStart);
+                if (spaceIndex != -1 && spaceIndex < tagEnd)
+                {
+                    positionArg = result.Substring(spaceIndex + 1, tagEnd - spaceIndex - 1).Trim();
+                }
+                
+                // Find the matching closing tag using manual counting
+                int contentStart = tagEnd + 1;
+                int depth = 1;
+                int pos = contentStart;
+                
+                while (pos < result.Length && depth > 0)
+                {
+                    int nextStn = result.IndexOf("<ppp:stn", pos, StringComparison.OrdinalIgnoreCase);
+                    int nextEndStn = result.IndexOf("<ppp:/stn>", pos, StringComparison.OrdinalIgnoreCase);
+                    
+                    if (nextEndStn == -1)
+                        break; // Malformed - no closing tag
+                        
+                    if (nextStn != -1 && nextStn < nextEndStn)
+                    {
+                        // Found nested STN before closing tag
+                        depth++;
+                        pos = nextStn + 8;
+                    }
+                    else
+                    {
+                        // Found closing tag
+                        depth--;
+                        if (depth == 0)
+                        {
+                            // This is our matching closing tag
+                            string content = result.Substring(contentStart, nextEndStn - contentStart);
+                            string fullMatch = result.Substring(stnStart, nextEndStn + 10 - stnStart);
+                            
+                            try
+                            {
+                                string replacement = ProcessStnStructure(positionArg, content, task);
+                                result = result.Substring(0, stnStart) + replacement + result.Substring(nextEndStn + 10);
+                                startIndex = stnStart + replacement.Length;
+                                break;
+                            }
+                            catch (Exception ex)
+                            {
+                                task.AddWarning($"Error processing STN command: {ex.Message}");
+                                startIndex = nextEndStn + 10;
+                                break;
+                            }
+                        }
+                        else
+                        {
+                            pos = nextEndStn + 10;
+                        }
+                    }
+                }
+                
+                if (depth > 0)
+                {
+                    // Malformed - no matching closing tag found
+                    task.AddWarning("Malformed STN command: no matching closing tag");
+                    break;
+                }
+            }
+            
+            return result;
+        }
+
+        /// <summary>
+        /// Processes STN insertion point markers (iN) and removes them with warnings.
+        /// </summary>
+        private string ProcessStnInsertionMarkers(string line, ProcessingTask task)
+        {
+            // Pattern to match insertion point markers like <ppp:stn i0>, <ppp:stn i1>, etc.
+            var regex = new Regex(@"<ppp:stn\s+i\d+\s*>", RegexOptions.IgnoreCase);
+            
+            return regex.Replace(line, match =>
+            {
+                task.AddWarning($"STN insertion point marker '{match.Value}' is not supported and has been removed");
+                return "";
+            });
+        }
+
+        /// <summary>
+        /// Processes a single STN structure and converts it to wcnegative directive.
+        /// </summary>
+        private string ProcessStnStructure(string positionArg, string content, ProcessingTask task)
+        {
+            // Recursively process the content to handle nested commands
+            string processedContent = ProcessWildcardLine(content, task.Id);
+            
+            // Determine the position mode and separator
+            bool isPrepend = true; // Default is start (prepend)
+            string separator = ", "; // Default separator for prepend (suffix)
+            
+            if (!string.IsNullOrEmpty(positionArg))
+            {
+                string pos = positionArg.ToLowerInvariant();
+                
+                if (pos == "e" || pos == "end")
+                {
+                    // End position - use append mode
+                    isPrepend = false;
+                    separator = ", "; // For append, we use prefix
+                }
+                else if (pos == "s" || pos == "start")
+                {
+                    // Start position - use prepend mode (already set)
+                    isPrepend = true;
+                    separator = ", ";
+                }
+                else if (pos.StartsWith("p") && pos.Length > 1 && char.IsDigit(pos[1]))
+                {
+                    // Insertion point (pN) - fallback to append with warning
+                    task.AddWarning($"STN insertion point '{positionArg}' is not supported by wcnegative, falling back to append mode");
+                    isPrepend = false;
+                    separator = ", ";
+                }
+                else if (pos != "")
+                {
+                    // Invalid position - default to start with warning
+                    task.AddWarning($"Invalid STN position '{positionArg}', defaulting to start position");
+                    isPrepend = true;
+                    separator = ", ";
+                }
+            }
+            
+            // Build the wcnegative directive
+            if (isPrepend)
+            {
+                // Prepend mode: content gets comma suffix
+                return $"<wcnegative[prepend]:{processedContent}{separator}>";
+            }
+            else
+            {
+                // Append mode: content gets comma prefix
+                return $"<wcnegative:{separator}{processedContent}>";
+            }
+        }
+
+        #endregion
+
     }
 
     public class ProcessingTask

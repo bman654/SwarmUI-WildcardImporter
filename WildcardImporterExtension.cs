@@ -38,6 +38,10 @@ namespace Spoomples.Extensions.WildcardImporter
             _api = new WildcardImporterAPI(processor);
             _api.Register();
 
+            // Initialize MagesHelper with extension folder path
+            MagesEngine.Init(this.FilePath);
+            PromptDirectives.RegisterPromptDirectives();
+
             AddT2IParameters();
             
             Detailer.Register(FilePath);
