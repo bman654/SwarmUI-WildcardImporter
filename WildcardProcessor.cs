@@ -1490,12 +1490,18 @@ namespace Spoomples.Extensions.WildcardImporter
                 {
                     // Recursively process each option to handle nested syntax
                     options[i] = ProcessWildcardLine(options[i], task.Id);
+                    // if option is weighted and has leading spaces, then trim the leading spaces
+                    if (Regex.Match(options[i], @"^\s+\d*(\.\d+)?::").Success)
+                    {
+                        options[i] = options[i].TrimStart();
+                    }
                 }
             }
 
             if (quantifierSpec == "" && options.Length == 1)
             {
-                return options[0];
+                // strip any weight from the option
+                return Regex.Replace(options[0], @"^\s*\d*(\.\d+)?::", "");
             }
 
             if (quantifierSpec == "" && options.Length == 0)

@@ -108,7 +108,7 @@ namespace Spoomples.Extensions.WildcardImporter
                 int colonIndex = rawString.IndexOf("::", StringComparison.Ordinal);
                 if (colonIndex > 0)
                 {
-                    string weightPart = rawString.Substring(0, colonIndex);
+                    string weightPart = rawString.Substring(0, colonIndex).Trim();
                     string valuePart = rawString.Substring(colonIndex + 2);
 
                     // Try to parse the weight part as a positive number

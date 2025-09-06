@@ -343,66 +343,10 @@ namespace Spoomples.Extensions.WildcardImporter
             }
         }
 
-        private static MethodInfo _wrapFunctionMethod;
-        private static MethodInfo _wrapFunctionMethodForMethodInfo;
         private static MethodInfo _wrapObjectMethod;
         private static MethodInfo _setFunctionMethodForDelegate;
         private static MethodInfo _setFunctionMethodForMethodInfo;
-
-        /// <summary>
-        /// Gets the WrapFunction extension method for Delegate
-        /// </summary>
-        private static MethodInfo GetWrapFunctionMethod()
-        {
-            if (_wrapFunctionMethod == null && _magesAssembly != null)
-            {
-                // Debug: List all types to see what's available
-                var allTypes = _magesAssembly.GetTypes();
-                Console.WriteLine($"Mages assembly types: {string.Join(", ", allTypes.Select(t => t.Name))}");
-                
-                // Try multiple possible extension class names
-                var extensionsType = allTypes.FirstOrDefault(t => 
-                    t.Name == "ObjectExtensions" || 
-                    t.Name == "Extensions" ||
-                    t.Name.Contains("Extensions") ||
-                    t.Name == "FunctionExtensions" ||
-                    t.Name == "EngineExtensions");
-                
-                if (extensionsType != null)
-                {
-                    Console.WriteLine($"Found extensions type: {extensionsType.FullName}");
-                    var methods = extensionsType.GetMethods(BindingFlags.Public | BindingFlags.Static);
-                    Console.WriteLine($"Available methods: {string.Join(", ", methods.Select(m => m.Name))}");
-                    
-                    _wrapFunctionMethod = methods.FirstOrDefault(m => m.Name == "WrapFunction" && 
-                                                m.GetParameters().Length == 1 && 
-                                                m.GetParameters()[0].ParameterType == typeof(Delegate));
-                }
-                else
-                {
-                    Console.WriteLine("No extensions type found");
-                }
-            }
-            return _wrapFunctionMethod;
-        }
-
-        /// <summary>
-        /// Gets the WrapFunction extension method for MethodInfo
-        /// </summary>
-        private static MethodInfo GetWrapFunctionMethodForMethodInfo()
-        {
-            if (_wrapFunctionMethodForMethodInfo == null && _magesAssembly != null)
-            {
-                var extensionsType = _magesAssembly.GetTypes()
-                    .FirstOrDefault(t => t.Name == "ObjectExtensions" || t.Name.Contains("Extensions"));
-                _wrapFunctionMethodForMethodInfo = extensionsType?.GetMethods(BindingFlags.Public | BindingFlags.Static)
-                    .FirstOrDefault(m => m.Name == "WrapFunction" && 
-                                        m.GetParameters().Length == 2 && 
-                                        m.GetParameters()[0].ParameterType == typeof(MethodInfo));
-            }
-            return _wrapFunctionMethodForMethodInfo;
-        }
-
+        
         /// <summary>
         /// Gets the WrapObject extension method
         /// </summary>
@@ -433,9 +377,7 @@ namespace Spoomples.Extensions.WildcardImporter
                 
                 if (extensionsType != null)
                 {
-                    Console.WriteLine($"Found EngineExtensions type: {extensionsType.FullName}");
                     var methods = extensionsType.GetMethods(BindingFlags.Public | BindingFlags.Static);
-                    Console.WriteLine($"Available methods: {string.Join(", ", methods.Select(m => m.Name))}");
                     
                     _setFunctionMethodForDelegate = methods.FirstOrDefault(m => 
                         m.Name == "SetFunction" && 
@@ -443,19 +385,6 @@ namespace Spoomples.Extensions.WildcardImporter
                         m.GetParameters()[0].ParameterType == _engineType &&
                         m.GetParameters()[1].ParameterType == typeof(string) &&
                         m.GetParameters()[2].ParameterType == typeof(Delegate));
-                        
-                    if (_setFunctionMethodForDelegate != null)
-                    {
-                        Console.WriteLine($"Found SetFunction method for Delegate: {_setFunctionMethodForDelegate}");
-                    }
-                    else
-                    {
-                        Console.WriteLine("SetFunction method for Delegate not found");
-                    }
-                }
-                else
-                {
-                    Console.WriteLine("EngineExtensions type not found");
                 }
             }
             return _setFunctionMethodForDelegate;
