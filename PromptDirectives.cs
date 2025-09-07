@@ -101,9 +101,9 @@ namespace Spoomples.Extensions.WildcardImporter
             return (count, separator);
         }
 
-        record struct WeightedChoice(string Value, double Weight)
+        record struct RandomChoice(string Value, double Weight)
         {
-            public WeightedChoice(string rawString) : this(rawString, 1.0)
+            public RandomChoice(string rawString) : this(rawString, 1.0)
             {
                 int colonIndex = rawString.IndexOf("::", StringComparison.Ordinal);
                 if (colonIndex > 0)
@@ -122,16 +122,16 @@ namespace Spoomples.Extensions.WildcardImporter
             }
         }
 
-        record WeightedSet(List<WeightedChoice> Choices)
+        record WeightedSet(List<RandomChoice> Choices)
         {
             public double TotalWeight { get; set; }
 
-            public WeightedSet(string[] rawVals) : this(new List<WeightedChoice>(rawVals.Length))
+            public WeightedSet(string[] rawVals) : this(new List<RandomChoice>(rawVals.Length))
             {
                 TotalWeight = 0;
                 foreach (string rawString in rawVals)
                 {
-                    var choice = new WeightedChoice(rawString);
+                    var choice = new RandomChoice(rawString);
                     Choices.Add(choice);
                     TotalWeight += choice.Weight;
                 }
@@ -212,7 +212,7 @@ namespace Spoomples.Extensions.WildcardImporter
                 string longestStr = "";
                 foreach (string val in rawVals)
                 {
-                    string interp = T2IPromptHandling.ProcessPromptLikeForLength(new WeightedChoice(val).Value);
+                    string interp = T2IPromptHandling.ProcessPromptLikeForLength(new RandomChoice(val).Value);
                     if (interp.Length > longest)
                     {
                         longest = interp.Length;

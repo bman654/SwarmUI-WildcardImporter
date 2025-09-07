@@ -734,17 +734,17 @@ namespace Spoomples.Extensions.WildcardImporter
 
             // Set with ifundefined modifier: <ppp:set varname ifundefined>value<ppp:/set>
             AssertTransform("<ppp:set color ifundefined>green<ppp:/set>", 
-                           "<wcmatch:<wccase[length(color) == 0]:<setmacro[color,false]:green>>>",
+                           "<wcmatch:<wccase[length(color) eq 0]:<setmacro[color,false]:green>>>",
                            "Set command with ifundefined modifier");
 
             // Set with evaluate ifundefined modifiers: <ppp:set varname evaluate ifundefined>value<ppp:/set>
             AssertTransform("<ppp:set color evaluate ifundefined>green<ppp:/set>", 
-                           "<wcmatch:<wccase[length(color) == 0]:<setvar[color,false]:green><setmacro[color,false]:<var:color>>>>",
+                           "<wcmatch:<wccase[length(color) eq 0]:<setvar[color,false]:green><setmacro[color,false]:<var:color>>>>",
                            "Set command with evaluate ifundefined modifiers");
 
             // Set with ifundefined evaluate modifiers in different order: <ppp:set varname ifundefined evaluate>value<ppp:/set>
             AssertTransform("<ppp:set color ifundefined evaluate>green<ppp:/set>", 
-                           "<wcmatch:<wccase[length(color) == 0]:<setvar[color,false]:green><setmacro[color,false]:<var:color>>>>",
+                           "<wcmatch:<wccase[length(color) eq 0]:<setvar[color,false]:green><setmacro[color,false]:<var:color>>>>",
                            "Set command with ifundefined evaluate modifiers");
 
             // Set with complex value containing variants
@@ -788,12 +788,12 @@ namespace Spoomples.Extensions.WildcardImporter
 
             // Ifundefined assignment: ${var?=value}
             AssertTransform("${color?=green}", 
-                           "<wcmatch:<wccase[length(color) == 0]:<setmacro[color,false]:green>>>",
+                           "<wcmatch:<wccase[length(color) eq 0]:<setmacro[color,false]:green>>>",
                            "Ifundefined assignment short form");
 
             // Immediate ifundefined assignment: ${var?=!value}
             AssertTransform("${color?=!green}", 
-                           "<wcmatch:<wccase[length(color) == 0]:<setvar[color,false]:green><setmacro[color,false]:<var:color>>>>",
+                           "<wcmatch:<wccase[length(color) eq 0]:<setvar[color,false]:green><setmacro[color,false]:<var:color>>>>",
                            "Immediate ifundefined assignment short form");
 
             // Add assignment with variant value
@@ -803,12 +803,12 @@ namespace Spoomples.Extensions.WildcardImporter
 
             // Ifundefined assignment with wildcard value
             AssertTransform("${style?=__modern_styles__}", 
-                           "<wcmatch:<wccase[length(style) == 0]:<setmacro[style,false]:<wcwildcard:modern_styles>>>>",
+                           "<wcmatch:<wccase[length(style) eq 0]:<setmacro[style,false]:<wcwildcard:modern_styles>>>>",
                            "Ifundefined assignment with wildcard value");
 
             // Multiple assignments in sequence
             AssertTransform("${color=red}${mood+=happy}${style?=modern}", 
-                           "<setmacro[color,false]:red><wcaddmacro[mood]:, happy><wcmatch:<wccase[length(style) == 0]:<setmacro[style,false]:modern>>>",
+                           "<setmacro[color,false]:red><wcaddmacro[mood]:, happy><wcmatch:<wccase[length(style) eq 0]:<setmacro[style,false]:modern>>>",
                            "Multiple assignments in sequence");
         }
 
@@ -853,22 +853,22 @@ namespace Spoomples.Extensions.WildcardImporter
 
             // Echo with default value: <ppp:echo varname>default<ppp:/echo>
             AssertTransform("<ppp:echo color>red<ppp:/echo>", 
-                           "<wcmatch:<wccase[length(color) == 0]:red><wccase:<macro:color>>>",
+                           "<wcmatch:<wccase[length(color) eq 0]:red><wccase:<macro:color>>>",
                            "Echo command with default value");
 
             // Echo with complex default containing variants
             AssertTransform("<ppp:echo mood>{happy|sad}<ppp:/echo>", 
-                           "<wcmatch:<wccase[length(mood) == 0]:<wcrandom:happy|sad>><wccase:<macro:mood>>>",
+                           "<wcmatch:<wccase[length(mood) eq 0]:<wcrandom:happy|sad>><wccase:<macro:mood>>>",
                            "Echo command with variant default");
 
             // Echo with wildcard default
             AssertTransform("<ppp:echo style>__styles__<ppp:/echo>", 
-                           "<wcmatch:<wccase[length(style) == 0]:<wcwildcard:styles>><wccase:<macro:style>>>",
+                           "<wcmatch:<wccase[length(style) eq 0]:<wcwildcard:styles>><wccase:<macro:style>>>",
                            "Echo command with wildcard default");
 
             // Multiple echo commands
             AssertTransform("<ppp:echo color>blue<ppp:/echo> and <ppp:echo size>large<ppp:/echo>", 
-                           "<wcmatch:<wccase[length(color) == 0]:blue><wccase:<macro:color>>> and <wcmatch:<wccase[length(size) == 0]:large><wccase:<macro:size>>>",
+                           "<wcmatch:<wccase[length(color) eq 0]:blue><wccase:<macro:color>>> and <wcmatch:<wccase[length(size) eq 0]:large><wccase:<macro:size>>>",
                            "Multiple echo commands");
 
             // Echo with empty default
@@ -878,7 +878,7 @@ namespace Spoomples.Extensions.WildcardImporter
 
             // Echo with whitespace in default
             AssertTransform("<ppp:echo color>  bright red  <ppp:/echo>", 
-                           "<wcmatch:<wccase[length(color) == 0]:  bright red  ><wccase:<macro:color>>>",
+                           "<wcmatch:<wccase[length(color) eq 0]:  bright red  ><wccase:<macro:color>>>",
                            "Echo command with whitespace in default");
         }
 
@@ -891,22 +891,22 @@ namespace Spoomples.Extensions.WildcardImporter
 
             // Variable with default: ${varname:default}
             AssertTransform("${color:red}", 
-                           "<wcmatch:<wccase[length(color) == 0]:red><wccase:<macro:color>>>",
+                           "<wcmatch:<wccase[length(color) eq 0]:red><wccase:<macro:color>>>",
                            "Variable with default short form");
 
             // Variable with complex default containing variants
             AssertTransform("${mood:{happy|sad}}", 
-                           "<wcmatch:<wccase[length(mood) == 0]:<wcrandom:happy|sad>><wccase:<macro:mood>>>",
+                           "<wcmatch:<wccase[length(mood) eq 0]:<wcrandom:happy|sad>><wccase:<macro:mood>>>",
                            "Variable with variant default");
 
             // Variable with wildcard default
             AssertTransform("${style:__styles__}", 
-                           "<wcmatch:<wccase[length(style) == 0]:<wcwildcard:styles>><wccase:<macro:style>>>",
+                           "<wcmatch:<wccase[length(style) eq 0]:<wcwildcard:styles>><wccase:<macro:style>>>",
                            "Variable with wildcard default");
 
             // Multiple variables in text
             AssertTransform("I like ${color:blue} ${animal:cats}", 
-                           "I like <wcmatch:<wccase[length(color) == 0]:blue><wccase:<macro:color>>> <wcmatch:<wccase[length(animal) == 0]:cats><wccase:<macro:animal>>>",
+                           "I like <wcmatch:<wccase[length(color) eq 0]:blue><wccase:<macro:color>>> <wcmatch:<wccase[length(animal) eq 0]:cats><wccase:<macro:animal>>>",
                            "Multiple variables with defaults");
 
             // Variable with empty default
@@ -916,12 +916,12 @@ namespace Spoomples.Extensions.WildcardImporter
 
             // Variable with colon in default (should handle properly)
             AssertTransform("${time:12:30}", 
-                           "<wcmatch:<wccase[length(time) == 0]:12:30><wccase:<macro:time>>>",
+                           "<wcmatch:<wccase[length(time) eq 0]:12:30><wccase:<macro:time>>>",
                            "Variable with colon in default");
 
             // Variable without default mixed with variable with default
             AssertTransform("${name} likes ${color:blue}", 
-                           "<macro:name> likes <wcmatch:<wccase[length(color) == 0]:blue><wccase:<macro:color>>>",
+                           "<macro:name> likes <wcmatch:<wccase[length(color) eq 0]:blue><wccase:<macro:color>>>",
                            "Mixed variables with and without defaults");
         }
 
@@ -944,27 +944,27 @@ namespace Spoomples.Extensions.WildcardImporter
 
             // Variable reference with multiple colons (should take first as separator)
             AssertTransform("${var:default:extra}", 
-                           "<wcmatch:<wccase[length(var) == 0]:default:extra><wccase:<macro:var>>>",
+                           "<wcmatch:<wccase[length(var) eq 0]:default:extra><wccase:<macro:var>>>",
                            "Variable with multiple colons in default");
 
             // Echo command with special characters in variable name
             AssertTransform("<ppp:echo my_var-123>default<ppp:/echo>", 
-                           "<wcmatch:<wccase[length(my_var-123) == 0]:default><wccase:<macro:my_var-123>>>",
+                           "<wcmatch:<wccase[length(my_var-123) eq 0]:default><wccase:<macro:my_var-123>>>",
                            "Echo command with special chars in variable name");
 
             // Variable reference with special characters
             AssertTransform("${my_var-123:default}", 
-                           "<wcmatch:<wccase[length(my_var-123) == 0]:default><wccase:<macro:my_var-123>>>",
+                           "<wcmatch:<wccase[length(my_var-123) eq 0]:default><wccase:<macro:my_var-123>>>",
                            "Variable reference with special chars");
 
             // Echo with default containing echo syntax (should be processed)
             AssertTransform("<ppp:echo color>${other:blue}<ppp:/echo>", 
-                           "<wcmatch:<wccase[length(color) == 0]:<wcmatch:<wccase[length(other) == 0]:blue><wccase:<macro:other>>>><wccase:<macro:color>>>",
+                           "<wcmatch:<wccase[length(color) eq 0]:<wcmatch:<wccase[length(other) eq 0]:blue><wccase:<macro:other>>>><wccase:<macro:color>>>",
                            "Echo with default containing variable reference");
 
             // Whitespace handling in long form
             AssertTransform("<ppp:echo  color  >  default  <ppp:/echo>", 
-                           "<wcmatch:<wccase[length(color) == 0]:  default  ><wccase:<macro:color>>>",
+                           "<wcmatch:<wccase[length(color) eq 0]:  default  ><wccase:<macro:color>>>",
                            "Echo command with whitespace");
         }
 
@@ -1240,32 +1240,32 @@ namespace Spoomples.Extensions.WildcardImporter
         {
             // Equality comparison
             AssertTransform("<ppp:if myvar eq \"test\">equal<ppp:/if>",
-                           "<wcmatch:<wccase[myvar == \"test\"]:equal>>",
+                           "<wcmatch:<wccase[myvar eq \"test\"]:equal>>",
                            "If with equality comparison");
 
             // Not equal comparison
             AssertTransform("<ppp:if myvar ne \"test\">not equal<ppp:/if>",
-                           "<wcmatch:<wccase[myvar ~= \"test\"]:not equal>>",
+                           "<wcmatch:<wccase[myvar ne \"test\"]:not equal>>",
                            "If with not equal comparison");
 
             // Greater than comparison
             AssertTransform("<ppp:if myvar gt 5>greater<ppp:/if>",
-                           "<wcmatch:<wccase[myvar > 5]:greater>>",
+                           "<wcmatch:<wccase[myvar gt 5]:greater>>",
                            "If with greater than comparison");
 
             // Less than comparison
             AssertTransform("<ppp:if myvar lt 10>less<ppp:/if>",
-                           "<wcmatch:<wccase[myvar < 10]:less>>",
+                           "<wcmatch:<wccase[myvar lt 10]:less>>",
                            "If with less than comparison");
 
             // Greater than or equal
             AssertTransform("<ppp:if myvar ge 5>greater or equal<ppp:/if>",
-                           "<wcmatch:<wccase[myvar >= 5]:greater or equal>>",
+                           "<wcmatch:<wccase[myvar ge 5]:greater or equal>>",
                            "If with greater than or equal comparison");
 
             // Less than or equal
             AssertTransform("<ppp:if myvar le 10>less or equal<ppp:/if>",
-                           "<wcmatch:<wccase[myvar <= 10]:less or equal>>",
+                           "<wcmatch:<wccase[myvar le 10]:less or equal>>",
                            "If with less than or equal comparison");
 
             // Contains comparison
@@ -1283,12 +1283,12 @@ namespace Spoomples.Extensions.WildcardImporter
 
             // In operation with list (variables)
             AssertTransform("<ppp:if myvar in (option1,option2,option3)>in list<ppp:/if>",
-                           "<wcmatch:<wccase[myvar == option1 || myvar == option2 || myvar == option3]:in list>>",
+                           "<wcmatch:<wccase[myvar eq option1 || myvar eq option2 || myvar eq option3]:in list>>",
                            "If with in list operation");
 
             // Single value in parentheses (should be treated as single value)
             AssertTransform("<ppp:if myvar eq (singleval)>single<ppp:/if>",
-                           "<wcmatch:<wccase[myvar == singleval]:single>>",
+                           "<wcmatch:<wccase[myvar eq singleval]:single>>",
                            "If with single value in parentheses");
 
             // Mixed quoted and unquoted values in list
@@ -1298,7 +1298,7 @@ namespace Spoomples.Extensions.WildcardImporter
 
             // All quoted values in list
             AssertTransform("<ppp:if myvar in (\"opt1\",\"opt2\",\"opt3\")>all quoted<ppp:/if>",
-                           "<wcmatch:<wccase[myvar == \"opt1\" || myvar == \"opt2\" || myvar == \"opt3\"]:all quoted>>",
+                           "<wcmatch:<wccase[myvar eq \"opt1\" || myvar eq \"opt2\" || myvar eq \"opt3\"]:all quoted>>",
                            "If with all quoted values");
         }
 
@@ -1306,22 +1306,22 @@ namespace Spoomples.Extensions.WildcardImporter
         {
             // Not with equality
             AssertTransform("<ppp:if myvar not eq \"test\">not equal<ppp:/if>",
-                           "<wcmatch:<wccase[myvar ~= \"test\"]:not equal>>",
+                           "<wcmatch:<wccase[myvar ne \"test\"]:not equal>>",
                            "If with not equality");
 
             // Not with contains
             AssertTransform("<ppp:if myvar not contains \"test\">not contains<ppp:/if>",
-                           "<wcmatch:<wccase[~contains(myvar, \"test\")]:not contains>>",
+                           "<wcmatch:<wccase[not contains(myvar, \"test\")]:not contains>>",
                            "If with not contains");
 
             // Not with list operation
             AssertTransform("<ppp:if myvar not in (val1,val2)>not in list<ppp:/if>",
-                           "<wcmatch:<wccase[myvar ~= val1 && myvar ~= val2]:not in list>>",
+                           "<wcmatch:<wccase[myvar ne val1 && myvar ne val2]:not in list>>",
                            "If with not in list");
 
             // Not with greater than
             AssertTransform("<ppp:if myvar not gt 5>not greater<ppp:/if>",
-                           "<wcmatch:<wccase[~(myvar > 5)]:not greater>>",
+                           "<wcmatch:<wccase[myvar le 5]:not greater>>",
                            "If with not greater than");
         }
 
@@ -1329,12 +1329,12 @@ namespace Spoomples.Extensions.WildcardImporter
         {
             // If-elif-else structure
             AssertTransform("<ppp:if var1 eq \"a\">first<ppp:elif var2 eq \"b\">second<ppp:else>third<ppp:/if>",
-                           "<wcmatch:<wccase[var1 == \"a\"]:first><wccase[var2 == \"b\"]:second><wccase:third>>",
+                           "<wcmatch:<wccase[var1 eq \"a\"]:first><wccase[var2 eq \"b\"]:second><wccase:third>>",
                            "If-elif-else structure");
 
             // Multiple elif clauses
             AssertTransform("<ppp:if var eq 1>one<ppp:elif var eq 2>two<ppp:elif var eq 3>three<ppp:else>other<ppp:/if>",
-                           "<wcmatch:<wccase[var == 1]:one><wccase[var == 2]:two><wccase[var == 3]:three><wccase:other>>",
+                           "<wcmatch:<wccase[var eq 1]:one><wccase[var eq 2]:two><wccase[var eq 3]:three><wccase:other>>",
                            "Multiple elif clauses");
 
             // Nested if statements
@@ -1344,7 +1344,7 @@ namespace Spoomples.Extensions.WildcardImporter
 
             // If with complex content including other syntax
             AssertTransform("<ppp:if style eq \"anime\">kawaii girl, {red|blue} hair<ppp:/if>",
-                           "<wcmatch:<wccase[style == \"anime\"]:kawaii girl, <wcrandom:red|blue> hair>>",
+                           "<wcmatch:<wccase[style eq \"anime\"]:kawaii girl, <wcrandom:red|blue> hair>>",
                            "If with complex content");
         }
 
@@ -1377,17 +1377,17 @@ namespace Spoomples.Extensions.WildcardImporter
 
             // Whitespace handling
             AssertTransform("<ppp:if   myvar   eq   \"test\"  >content<ppp:/if>",
-                           "<wcmatch:<wccase[myvar == \"test\"]:content>>",
+                           "<wcmatch:<wccase[myvar eq \"test\"]:content>>",
                            "If with extra whitespace");
 
             // Case insensitive operations
             AssertTransform("<ppp:if myvar EQ \"test\">content<ppp:/if>",
-                           "<wcmatch:<wccase[myvar == \"test\"]:content>>",
+                           "<wcmatch:<wccase[myvar eq \"test\"]:content>>",
                            "If with uppercase operation");
 
             // Variable with special characters
             AssertTransform("<ppp:if my_var-123 eq \"test\">content<ppp:/if>",
-                           "<wcmatch:<wccase[my_var-123 == \"test\"]:content>>",
+                           "<wcmatch:<wccase[my_var-123 eq \"test\"]:content>>",
                            "If with special characters in variable name");
         }
 
@@ -1506,17 +1506,17 @@ namespace Spoomples.Extensions.WildcardImporter
 
             // STN with if statement as negative content
             AssertTransform("<ppp:stn><ppp:if quality eq \"low\">blurry, pixelated<ppp:/if><ppp:/stn>",
-                           "<wcnegative[prepend]:<wcmatch:<wccase[quality == \"low\"]:blurry, pixelated>>, >",
+                           "<wcnegative[prepend]:<wcmatch:<wccase[quality eq \"low\"]:blurry, pixelated>>, >",
                            "STN with if statement");
 
             // STN with if-else statement as negative content
             AssertTransform("<ppp:stn><ppp:if style eq \"anime\">cartoon<ppp:else>realistic<ppp:/if><ppp:/stn>",
-                           "<wcnegative[prepend]:<wcmatch:<wccase[style == \"anime\"]:cartoon><wccase:realistic>>, >",
+                           "<wcnegative[prepend]:<wcmatch:<wccase[style eq \"anime\"]:cartoon><wccase:realistic>>, >",
                            "STN with if-else statement");
 
             // STN with complex if statement and variants
             AssertTransform("<ppp:stn><ppp:if mood eq \"dark\">{gloomy|depressing}<ppp:else>bright<ppp:/if><ppp:/stn>",
-                           "<wcnegative[prepend]:<wcmatch:<wccase[mood == \"dark\"]:<wcrandom:gloomy|depressing>><wccase:bright>>, >",
+                           "<wcnegative[prepend]:<wcmatch:<wccase[mood eq \"dark\"]:<wcrandom:gloomy|depressing>><wccase:bright>>, >",
                            "STN with if statement containing variants");
 
             // STN with nested wildcards and variables
@@ -1526,7 +1526,7 @@ namespace Spoomples.Extensions.WildcardImporter
 
             // STN with echo command as negative content
             AssertTransform("<ppp:stn><ppp:echo negative_prompt>default negative<ppp:/echo><ppp:/stn>",
-                           "<wcnegative[prepend]:<wcmatch:<wccase[length(negative_prompt) == 0]:default negative><wccase:<macro:negative_prompt>>>, >",
+                           "<wcnegative[prepend]:<wcmatch:<wccase[length(negative_prompt) eq 0]:default negative><wccase:<macro:negative_prompt>>>, >",
                            "STN with echo command");
 
             // STN with set and echo commands

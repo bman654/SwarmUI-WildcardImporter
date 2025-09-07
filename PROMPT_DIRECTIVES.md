@@ -168,15 +168,16 @@ A `<wccase>` block with no condition will be treated as the default case and wil
 - Logical operators: `&&` (and), `||` (or)
 - Grouping: `(` and `)`
 - String contains functions
+- negation operator: `not` (`not true`, `not contains(myvar, "text")`, ...)
 - Comparison operators:
-  - `"string" == myvar` (case-sensitive equality)
-  - `"string" ~= myvar` (case-sensitive inequality)
+  - `"string" eq myvar` (case-sensitive equality)
+  - `"string" ne myvar` (case-sensitive inequality)
   - `contains(myvar, "text")` (case-sensitive partial match)
   - `icontains(myvar, "text")` (case-insensitive partial match)
-  - `length(myvar) > 10` (length of string greater than)
-  - `length(myvar) < 10` (length of string less than)
-  - `length(myvar) >= 10` (length of string greater than or equal to)
-  - `length(myvar) <= 10` (length of less than or equal to)
+  - `length(myvar) gt 10` (length of string greater than)
+  - `length(myvar) lt 10` (length of string less than)
+  - `length(myvar) ge 10` (length of string greater than or equal to)
+  - `length(myvar) le 10` (length of less than or equal to)
 **Behavior:**
 - Evaluates conditions in order
 - Returns content from first matching condition

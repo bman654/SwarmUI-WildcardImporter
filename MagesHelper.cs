@@ -143,16 +143,19 @@ namespace Spoomples.Extensions.WildcardImporter
             if (string.IsNullOrEmpty(expression))
                 return null;
             
-            if (_compiledFunctions.TryGetValue(expression, out var cachedFunction))
+            // Convert alphanumeric operators to symbolic operators for Mage expression language
+            var convertedExpression = ConvertAlphanumericOperators(expression);
+            
+            if (_compiledFunctions.TryGetValue(convertedExpression, out var cachedFunction))
                 return cachedFunction;
 
             try
             {
-                var compiledFunction = _compileMethod?.Invoke(_engine, new object[] { expression });
+                var compiledFunction = _compileMethod?.Invoke(_engine, new object[] { convertedExpression });
                 if (compiledFunction != null)
                 {
-                    _compiledFunctions[expression] = compiledFunction as Func<object>;
-                    return _compiledFunctions[expression];
+                    _compiledFunctions[convertedExpression] = compiledFunction as Func<object>;
+                    return _compiledFunctions[convertedExpression];
                 }
                 return null;
             }
@@ -466,6 +469,29 @@ namespace Spoomples.Extensions.WildcardImporter
             {
                 _initialized = true; // Mark as initialized even if failed to prevent retries
             }
+        }
+
+        /// <summary>
+        /// Converts alphanumeric operators to symbolic operators for Mage expression language
+        /// </summary>
+        /// <param name="expression">Expression with alphanumeric operators</param>
+        /// <returns>Expression with symbolic operators</returns>
+        private static string ConvertAlphanumericOperators(string expression)
+        {
+            if (string.IsNullOrEmpty(expression))
+                return expression;
+
+            // Use word boundaries to ensure we only replace standalone operators, not parts of words
+            // Order matters: longer operators first to avoid partial replacements
+            expression = System.Text.RegularExpressions.Regex.Replace(expression, @"\bge\b", ">=");
+            expression = System.Text.RegularExpressions.Regex.Replace(expression, @"\ble\b", "<=");
+            expression = System.Text.RegularExpressions.Regex.Replace(expression, @"\bne\b", "~=");
+            expression = System.Text.RegularExpressions.Regex.Replace(expression, @"\beq\b", "==");
+            expression = System.Text.RegularExpressions.Regex.Replace(expression, @"\bgt\b", ">");
+            expression = System.Text.RegularExpressions.Regex.Replace(expression, @"\blt\b", "<");
+            expression = System.Text.RegularExpressions.Regex.Replace(expression, @"\bnot\b", "~");
+            
+            return expression;
         }
 
         public void Dispose()

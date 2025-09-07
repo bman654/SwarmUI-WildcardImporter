@@ -499,13 +499,13 @@ namespace Spoomples.Extensions.WildcardImporter
                         if (varValue.StartsWith("!"))
                         {
                             varValue = varValue.Substring(1);
-                            // Immediate ifundefined: ${var?=!value} -> <wcmatch:<wccase[length(var) == 0]:<setvar[var,false]:value><setmacro[var,false]:<var:var>>>>
-                            replacement = $"<wcmatch:<wccase[length({varName}) == 0]:<setvar[{varName},false]:{varValue}><setmacro[{varName},false]:<var:{varName}>>>>";
+                            // Immediate ifundefined: ${var?=!value} -> <wcmatch:<wccase[length(var) eq 0]:<setvar[var,false]:value><setmacro[var,false]:<var:var>>>>
+                            replacement = $"<wcmatch:<wccase[length({varName}) eq 0]:<setvar[{varName},false]:{varValue}><setmacro[{varName},false]:<var:{varName}>>>>";
                         }
                         else
                         {
-                            // Deferred ifundefined: ${var?=value} -> <wcmatch:<wccase[length(var) == 0]:<setmacro[var,false]:value>>>
-                            replacement = $"<wcmatch:<wccase[length({varName}) == 0]:<setmacro[{varName},false]:{varValue}>>>";
+                            // Deferred ifundefined: ${var?=value} -> <wcmatch:<wccase[length(var) eq 0]:<setmacro[var,false]:value>>>
+                            replacement = $"<wcmatch:<wccase[length({varName}) eq 0]:<setmacro[{varName},false]:{varValue}>>>";
                         }
                     }
                     else
@@ -552,7 +552,7 @@ namespace Spoomples.Extensions.WildcardImporter
                             string processedDefault = ProcessWildcardLine(defaultValue, task.Id);
                             
                             // Return wcmatch with condition for empty variable and else clause
-                            replacement = $"<wcmatch:<wccase[length({variableName}) == 0]:{processedDefault}><wccase:<macro:{variableName}>>>";
+                            replacement = $"<wcmatch:<wccase[length({variableName}) eq 0]:{processedDefault}><wccase:<macro:{variableName}>>>";
                         }
                     }
                     else
@@ -581,8 +581,8 @@ namespace Spoomples.Extensions.WildcardImporter
              * - <ppp:set varname evaluate>value<ppp:/set> -> <setvar[varname,false]:value><setmacro[varname,false]:<var:varname>>
              * - <ppp:set varname add>value<ppp:/set> -> <wcaddmacro[varname]:, value>
              * - <ppp:set varname evaluate add>value<ppp:/set> -> <setvar[varname,false]:<macro:varname>, value><setmacro[varname,false]:<var:varname>>
-             * - <ppp:set varname ifundefined>value<ppp:/set> -> <wcmatch:<wccase[length(varname) == 0]:<setmacro[varname,false]:value>>>
-             * - <ppp:set varname evaluate ifundefined>value<ppp:/set> -> <wcmatch:<wccase[length(varname) == 0]:<setvar[varname,false]:value><setmacro[varname,false]:<var:varname>>>>
+             * - <ppp:set varname ifundefined>value<ppp:/set> -> <wcmatch:<wccase[length(varname) eq 0]:<setmacro[varname,false]:value>>>
+             * - <ppp:set varname evaluate ifundefined>value<ppp:/set> -> <wcmatch:<wccase[length(varname) eq 0]:<setvar[varname,false]:value><setmacro[varname,false]:<var:varname>>>>
              */
             var result = new StringBuilder(input);
             var startIndex = 0;
@@ -655,13 +655,13 @@ namespace Spoomples.Extensions.WildcardImporter
                 {
                     if (modifiers.Contains("evaluate"))
                     {
-                        // Immediate ifundefined: <wcmatch:<wccase[length(varname) == 0]:<setvar[varname,false]:value><setmacro[varname,false]:<var:varname>>>>
-                        replacement = $"<wcmatch:<wccase[length({varName}) == 0]:<setvar[{varName},false]:{value}><setmacro[{varName},false]:<var:{varName}>>>>";
+                        // Immediate ifundefined: <wcmatch:<wccase[length(varname) eq 0]:<setvar[varname,false]:value><setmacro[varname,false]:<var:varname>>>>
+                        replacement = $"<wcmatch:<wccase[length({varName}) eq 0]:<setvar[{varName},false]:{value}><setmacro[{varName},false]:<var:{varName}>>>>";
                     }
                     else
                     {
-                        // Deferred ifundefined: <wcmatch:<wccase[length(varname) == 0]:<setmacro[varname,false]:value>>>
-                        replacement = $"<wcmatch:<wccase[length({varName}) == 0]:<setmacro[{varName},false]:{value}>>>";
+                        // Deferred ifundefined: <wcmatch:<wccase[length(varname) eq 0]:<setmacro[varname,false]:value>>>
+                        replacement = $"<wcmatch:<wccase[length({varName}) eq 0]:<setmacro[{varName},false]:{value}>>>";
                     }
                 }
                 else if (modifiers.Contains("add"))
@@ -1743,7 +1743,7 @@ namespace Spoomples.Extensions.WildcardImporter
                 string processedDefault = ProcessWildcardLine(defaultValue, task.Id);
                 
                 // Return wcmatch with condition for empty variable and else clause
-                return $"<wcmatch:<wccase[length({varName}) == 0]:{processedDefault}><wccase:<macro:{varName}>>>";
+                return $"<wcmatch:<wccase[length({varName}) eq 0]:{processedDefault}><wccase:<macro:{varName}>>>";
             }, RegexOptions.IgnoreCase);
             
             // Then process <ppp:echo varname> (without default) - only if not already processed
@@ -2060,21 +2060,21 @@ namespace Spoomples.Extensions.WildcardImporter
             switch (operation.ToLowerInvariant())
             {
                 case "eq":
-                    return isNot ? $"{variable} ~= {value}" : $"{variable} == {value}";
+                    return isNot ? $"{variable} ne {value}" : $"{variable} eq {value}";
                 case "ne":
-                    return isNot ? $"{variable} == {value}" : $"{variable} ~= {value}";
+                    return isNot ? $"{variable} eq {value}" : $"{variable} ne {value}";
                 case "gt":
-                    return isNot ? $"~({variable} > {value})" : $"{variable} > {value}";
+                    return isNot ? $"{variable} le {value}" : $"{variable} gt {value}";
                 case "lt":
-                    return isNot ? $"~({variable} < {value})" : $"{variable} < {value}";
+                    return isNot ? $"{variable} ge {value}" : $"{variable} lt {value}";
                 case "ge":
-                    return isNot ? $"~({variable} >= {value})" : $"{variable} >= {value}";
+                    return isNot ? $"{variable} lt {value}" : $"{variable} ge {value}";
                 case "le":
-                    return isNot ? $"~({variable} <= {value})" : $"{variable} <= {value}";
+                    return isNot ? $"{variable} gt {value}" : $"{variable} le {value}";
                 case "contains":
-                    return isNot ? $"~contains({variable}, {value})" : $"contains({variable}, {value})";
+                    return isNot ? $"not contains({variable}, {value})" : $"contains({variable}, {value})";
                 case "in":
-                    return isNot ? $"~({variable} == {value})" : $"{variable} == {value}";
+                    return isNot ? $"not contains({value}, {variable})" : $"contains({value}, {variable})";
                 default:
                     // Return as-is for unknown operations
                     return $"{variable} {operation} {value}";
@@ -2096,7 +2096,7 @@ namespace Spoomples.Extensions.WildcardImporter
                         expressions.Add($"contains({variable}, {value})");
                         break;
                     case "in":
-                        expressions.Add($"{variable} == {value}");
+                        expressions.Add($"{variable} eq {value}");
                         break;
                     default:
                         throw new InvalidOperationException($"Operation '{operation}' not supported with lists");
@@ -2109,12 +2109,12 @@ namespace Spoomples.Extensions.WildcardImporter
                 // For NOT operations, we need AND (De Morgan's law: not (A or B) = (not A) and (not B))
                 if (operation.ToLowerInvariant() == "contains")
                 {
-                    expressions = expressions.Select(expr => $"~{expr}").ToList();
+                    expressions = expressions.Select(expr => $"not {expr}").ToList();
                     joinOperator = " && ";
                 }
                 else // in
                 {
-                    expressions = expressions.Select(expr => expr.Replace("==", "~=")).ToList();
+                    expressions = expressions.Select(expr => expr.Replace(" eq ", " ne ")).ToList();
                     joinOperator = " && ";
                 }
             }
