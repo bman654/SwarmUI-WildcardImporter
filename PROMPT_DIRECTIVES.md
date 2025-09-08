@@ -40,7 +40,7 @@ You can conditionally exclude options from the list by adding an `if` expression
 
 **Features:**
 - **Weighted Selection**: Use `weight::option` syntax to control probability
-- **Conditional Options**: Exclude options based upon variablestate using `if` expression syntax
+- **Conditional Options**: Exclude options based upon variable state using `if` expression syntax
 - **Custom Separators**: Specify separator after count (default is `' '`)
 - **Multiple Selections**: Use `[count]` or `[min-max]` to select multiple options
 - **No Repetition**: Avoids repeating the same option unless count exceeds available options
@@ -86,6 +86,30 @@ An enhanced version of SwarmUI's built-in `<wildcard>` directive with support fo
 - `<wcwildcard[1-3,]:colors>` → might return `"red, blue, green"`
 - `<wcwildcard[2, and ]:styles>` → might return `"realistic and detailed"`
 - `<wcwildcard:characters,not=villain|monster>` → excludes villain and monster options
+
+#### Wildcard Choices
+
+`wcwildcard` also supports enhanced formats for the choices within a wildcard file.  Each line in the file (a choice) supports
+the same syntax as the choices in `<wcrandom>`.
+
+**Features:**
+- **Weighted Selection**: Use `weight::option` syntax to control probability
+- **Conditional Options**: Exclude options based upon variable state using `if` expression syntax
+
+**Syntax:**
+```
+[[weight] [if condition]::]value
+```
+
+**Example Wildcard File:**
+
+| Example                          | Description                                                                  | 
+|----------------------------------|------------------------------------------------------------------------------|
+| `white`                          | Simple wildcard choice with no options (weight = 1.0)                        |
+| `0.3::red`                       | Weighted choice (weight = 0.3)                                               |
+| `if luck eq "normal"::blue`      | Conditional choice (choice not available unless `luck` variable == "normal") |
+| `0.3 if luck eq "normal"::green` | Weighted conditional choice                                                  |
+
 
 ## Negative Prompt Management
 

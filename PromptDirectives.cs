@@ -251,14 +251,14 @@ namespace Spoomples.Extensions.WildcardImporter
         {
             public double TotalWeight { get; set; }
             
-            public RandomChoicesSet(string[] rawVals, T2IPromptHandling.PromptTagContext context, ChoiceLabelFilter filter) : this(new List<RandomChoice>(rawVals.Length))
+            public RandomChoicesSet(string[] rawVals, T2IPromptHandling.PromptTagContext context, ChoiceLabelFilter filter, HashSet<string> exclude = null) : this(new List<RandomChoice>(rawVals.Length))
             {
                 TotalWeight = 0;
                 int position = 0;
                 foreach (string rawString in rawVals)
                 {
                     var choice = new RandomChoice(rawString);
-                    if (filter.IsMatch(choice, position) && choice.IsConditionTrue(context) && choice.Weight > 0)
+                    if (choice.Weight > 0 && !(exclude?.Contains(choice.Value) ?? false) && filter.IsMatch(choice, position) && choice.IsConditionTrue(context))
                     {
                         Choices.Add(choice);
                         TotalWeight += choice.Weight;
@@ -315,9 +315,8 @@ namespace Spoomples.Extensions.WildcardImporter
                     return result;
                 }
                 
-                var origSet = new RandomChoicesSet(new List<RandomChoice>(set.Choices));
-                origSet.TotalWeight = set.TotalWeight;
-                
+                var origSet = set with { Choices = [..set.Choices] };
+               
                 for (int i = 0; i < count; i++)
                 {
                     string choice = set.TakeRandom(context);
@@ -479,16 +478,6 @@ namespace Spoomples.Extensions.WildcardImporter
 
         private static void EnhancedWildcard()
         {
-            /*
-               Enhanced wildcard directive that uses the new InterpretPredataForRandom method
-               with support for custom separators:
-               <wcwildcard:cardname>
-               <wcwildcard[2]:cardname>
-               <wcwildcard[1-3]:cardname>
-               <wcwildcard[2,]:cardname> // separator is ", "
-               <wcwildcard[1-3, and ]:cardname> // separator is " and "
-               <wcwildcard:cardname,not=option1|option2> // exclude specific options
-             */
             T2IPromptHandling.PromptTagProcessors["wcwildcard"] = (data, context) =>
             {
                 data = context.Parse(data);
@@ -517,41 +506,26 @@ namespace Spoomples.Extensions.WildcardImporter
                 WildcardsHelper.Wildcard wildcard = WildcardsHelper.GetWildcard(card);
                 List<string> usedWildcards = context.Input.ExtraMeta.GetOrCreate("used_wildcards", () => new List<string>()) as List<string>;
                 usedWildcards.Add(card);
-                string[] options = wildcard.Options;
-                if (exclude.Count > 0)
-                {
-                    options = [.. options.Except(exclude)];
-                }
-                if (options.Length == 0)
+                var set = new RandomChoicesSet(wildcard.Options, context, ChoiceLabelFilter.Empty, exclude);
+                if (set.Choices.Count == 0)
                 {
                     return "";
                 }
-                List<string> vals = [.. options];
+                
+                var origSet = set with { Choices = [..set.Choices] };
                 string result = "";
                 for (int i = 0; i < count; i++)
                 {
-                    int index;
-                    if (context.Input.Get(T2IParamTypes.WildcardSeedBehavior, "Random") == "Index")
-                    {
-                        index = context.Input.GetWildcardSeed() % vals.Count;
-                    }
-                    else
-                    {
-                        index = context.Input.GetWildcardRandom().Next(vals.Count);
-                    }
-                    string choice = vals[index];
+                    string choice = set.TakeRandom(context);
                     if (result != "")
                     {
                         result += partSeparator;
                     }
                     result += context.Parse(choice).Trim();
-                    if (vals.Count == 1)
+                    if (set.Choices.Count == 0)
                     {
-                        vals = [.. options];
-                    }
-                    else
-                    {
-                        vals.RemoveAt(index);
+                        set.Choices.AddRange(origSet.Choices);
+                        set.TotalWeight = origSet.TotalWeight;
                     }
                 }
                 return result.Trim();
