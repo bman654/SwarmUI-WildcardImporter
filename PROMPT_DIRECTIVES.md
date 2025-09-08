@@ -30,8 +30,17 @@ Like `<random>`, the options in `<wcrandom>` can be separated by `,` or `|` or `
 <wcrandom:0.3::rare option|6::common option|normal option>
 ```
 
+**Conditional Options**
+
+You can conditionally exclude options from the list by adding an `if` expression after the weight.  See [Conditional Logic](#conditional-logic) for expression syntax.
+
+```
+<wcrandom:0.3 if luck eq "normal"::rare option|1 if luck eq "good"::rare option|6::common option|normal option>
+```
+
 **Features:**
 - **Weighted Selection**: Use `weight::option` syntax to control probability
+- **Conditional Options**: Exclude options based upon variablestate using `if` expression syntax
 - **Custom Separators**: Specify separator after count (default is `' '`)
 - **Multiple Selections**: Use `[count]` or `[min-max]` to select multiple options
 - **No Repetition**: Avoids repeating the same option unless count exceeds available options
@@ -39,7 +48,7 @@ Like `<random>`, the options in `<wcrandom>` can be separated by `,` or `|` or `
 **Examples:**
 - `<wcrandom[2]:red|blue|green>` → might return `"red blue"`
 - `<wcrandom[1-3,]:apple|banana|cherry>` → might return `"apple, banana"`
-- `<wcrandom:0.1::legendary|1::rare|10::common>` → heavily favors "common"
+- `<wcrandom:0.1 if luck eq "exceptional"::legendary|if luck eq "good" or luck eq "exceptional"::rare|10::common>` → heavily favors "common".  "legendary" is excluded from possible options if variable `luck` is not "exceptional".  "rare" is excluded from possible options if variable `luck` is not "good" or "exceptional".
 
 ## Enhanced Wildcard Selection
 
@@ -165,7 +174,7 @@ A `<wccase>` block with no condition will be treated as the default case and wil
 
 **Condition Expression Support:**
 - Variable comparisons: `myvar == "value"`
-- Logical operators: `&&` (and), `||` (or)
+- Logical operators: `and` , `or`
 - Grouping: `(` and `)`
 - String contains functions
 - negation operator: `not` (`not true`, `not contains(myvar, "text")`, ...)
@@ -201,8 +210,8 @@ A `<wccase>` block with no condition will be treated as the default case and wil
 <setvar[style,false]:<random:realistic|anime|cartoon>>
 <setvar[gender,false]:<random:male|female>>
 <wcmatch:
-  <wccase[style == "anime" && gender == "female"]:kawaii, moe, detailed anime girl>
-  <wccase[contains(style, "real") && gender == "male"]:photorealistic man, detailed>
+  <wccase[style == "anime" and gender == "female"]:kawaii, moe, detailed anime girl>
+  <wccase[contains(style, "real") and gender == "male"]:photorealistic man, detailed>
   <wccase[icontains(style, "CARTOON")]:colorful cartoon character>
   <wccase:default artistic style>
 >

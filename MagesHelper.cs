@@ -490,6 +490,8 @@ namespace Spoomples.Extensions.WildcardImporter
             expression = System.Text.RegularExpressions.Regex.Replace(expression, @"\bgt\b", ">");
             expression = System.Text.RegularExpressions.Regex.Replace(expression, @"\blt\b", "<");
             expression = System.Text.RegularExpressions.Regex.Replace(expression, @"\bnot\b", "~");
+            expression = System.Text.RegularExpressions.Regex.Replace(expression, @"\band\b", "&&");
+            expression = System.Text.RegularExpressions.Regex.Replace(expression, @"\bor\b", "||");
             
             return expression;
         }

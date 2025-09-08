@@ -1,11 +1,12 @@
 namespace Spoomples.Extensions.WildcardImporter
 {
     using System.Runtime.CompilerServices;
+    using System.Text.RegularExpressions;
     using FreneticUtilities.FreneticExtensions;
     using SwarmUI.Text2Image;
     using SwarmUI.Utils;
 
-    public static class PromptDirectives
+    public static partial class PromptDirectives
     {
         // get a new MagesEngine for each Variables dictionary we see.  This effectively gives us a new engine for each prompt we process
         public static ConditionalWeakTable<T2IPromptHandling.PromptTagContext, MagesEngine> EngineCache = new ();
@@ -101,39 +102,168 @@ namespace Spoomples.Extensions.WildcardImporter
             return (count, separator);
         }
 
-        record struct RandomChoice(string Value, double Weight)
-        {
-            public RandomChoice(string rawString) : this(rawString, 1.0)
-            {
-                int colonIndex = rawString.IndexOf("::", StringComparison.Ordinal);
-                if (colonIndex > 0)
-                {
-                    string weightPart = rawString.Substring(0, colonIndex).Trim();
-                    string valuePart = rawString.Substring(colonIndex + 2);
+        [GeneratedRegex(@"\bif\s+(?<expr>.*)$")]
+        public static partial Regex IfConditionRE();
+        
+        [GeneratedRegex(@"\((?<labels>[^)]*)\)")]
+        public static partial Regex LabelsRE();
 
-                    // Try to parse the weight part as a positive number
-                    if (double.TryParse(weightPart, out double parsedWeight))
+        record struct RandomChoice(string Value, double Weight, string ConditionExpression, HashSet<string> Labels)
+        {
+            public RandomChoice(string rawString) : this(rawString, 1.0, null, new HashSet<string>())
+            {
+                var (rawOpts, value) = rawString.BeforeAndAfter("::");
+                if (value != "")
+                {
+                    Value = value;
+                    
+                    // parse the options, which looks like:
+                    // 13 (label1,label2,label3) if x eq "42"
+                    // each component is optional.
+                    
+                    // Lets first see if there is an if condition expression by searching for "\bif "
+                    var opts = rawOpts.Trim();
+                    var match = IfConditionRE().Match(opts);
+                    if (match.Success)
                     {
-                        Value = valuePart;
-                        Weight = Math.Max(0, parsedWeight);
-                        return;
+                        ConditionExpression = match.Groups["expr"].Value;
+                        opts = opts.Substring(0, match.Index).Trim();
+                    }
+                    
+                    // Now lets look for a labels section
+                    match = LabelsRE().Match(opts);
+                    if (match.Success)
+                    {
+                        var labels = match.Groups["labels"].Value.SplitFast(',');
+                        foreach (var label in labels)
+                        {
+                            Labels.Add(label.Trim());
+                        }
+                        opts = opts.Remove(match.Index, match.Length).Trim();
+                    }
+                    
+                    // Now look for a weight
+                    if (opts != "")
+                    {
+                        if (double.TryParse(opts, out double parsedWeight))
+                        {
+                            Weight = Math.Max(0, parsedWeight);;
+                        }
+                        else
+                        {
+                            Logs.Warning($"Random choice options section is malformed: '{rawOpts}'");
+                        }
                     }
                 }
             }
+            
+            public bool IsConditionTrue(T2IPromptHandling.PromptTagContext context)
+            {
+                if (ConditionExpression is null)
+                {
+                    return true;
+                }
+                var magesEngine = GetEngine(context);
+                var exprResult = magesEngine.Compile(ConditionExpression)();
+                return exprResult is true or string { Length: > 0 } or double and > 0;
+            }
         }
 
-        record WeightedSet(List<RandomChoice> Choices)
+        record ChoiceLabelFilterEntry(int Position, List<string> PositiveLabels, List<string> NegativeLabels)
+        {
+            public ChoiceLabelFilterEntry(string rawString) : this(-1, null, null)
+            {
+                // will look like one of these:
+                // label1
+                // 13
+                // label2+label3
+                // !label4
+                // label5+!label2
+                
+                // try to parse it as an integer
+                if (int.TryParse(rawString, out int position))
+                {
+                    Position = position;
+                    return;
+                }
+                
+                // try to parse it as a +-separated
+                foreach (var rawLabel in rawString.SplitFast('+'))
+                {
+                    var trimmedRawLabel = rawLabel.Trim();
+                    if (trimmedRawLabel.StartsWith('!'))
+                    {
+                        if (NegativeLabels is null)
+                        {
+                            NegativeLabels = new List<string>();
+                        }
+                        NegativeLabels.Add(trimmedRawLabel.Substring(1).Trim());
+                    }
+                    else
+                    {
+                        if (PositiveLabels is null)
+                        {
+                            PositiveLabels = new List<string>();
+                        }
+                        PositiveLabels.Add(trimmedRawLabel);
+                    }
+                }
+            }
+
+            public bool IsMatch(RandomChoice choice, int position)
+            {
+                if (Position == position)
+                {
+                    return true;
+                }
+                if (!(PositiveLabels?.All(label => choice.Labels.Contains(label)) ?? true))
+                {
+                    return false;
+                }
+                if (NegativeLabels?.Any(label => choice.Labels.Contains(label)) ?? false)
+                {
+                    return false;
+                }
+                
+                return true;
+            }
+        }
+
+        record ChoiceLabelFilter(List<ChoiceLabelFilterEntry> Entries)
+        {
+            public static ChoiceLabelFilter Empty => new(new List<ChoiceLabelFilterEntry>());
+            public ChoiceLabelFilter(string rawString) : this(new List<ChoiceLabelFilterEntry>())
+            {
+                // string should look like: label1,13,label2+label3,!label4,label5+!label2
+                foreach (var rawEntry in rawString.SplitFast(','))
+                {
+                    Entries.Add(new ChoiceLabelFilterEntry(rawEntry));
+                }
+            }
+
+            public bool IsMatch(RandomChoice choice, int position)
+            {
+                return Entries.IsEmpty() || Entries.Exists(entry => entry.IsMatch(choice, position));
+            }
+        }
+
+        record RandomChoicesSet(List<RandomChoice> Choices)
         {
             public double TotalWeight { get; set; }
-
-            public WeightedSet(string[] rawVals) : this(new List<RandomChoice>(rawVals.Length))
+            
+            public RandomChoicesSet(string[] rawVals, T2IPromptHandling.PromptTagContext context, ChoiceLabelFilter filter) : this(new List<RandomChoice>(rawVals.Length))
             {
                 TotalWeight = 0;
+                int position = 0;
                 foreach (string rawString in rawVals)
                 {
                     var choice = new RandomChoice(rawString);
-                    Choices.Add(choice);
-                    TotalWeight += choice.Weight;
+                    if (filter.IsMatch(choice, position) && choice.IsConditionTrue(context) && choice.Weight > 0)
+                    {
+                        Choices.Add(choice);
+                        TotalWeight += choice.Weight;
+                    }
+                    ++position;
                 }
             }
 
@@ -165,16 +295,6 @@ namespace Spoomples.Extensions.WildcardImporter
 
         private static void EnhancedRandom()
         {
-            /*
-               use " " as the separator:
-               <wcrandom[1-3]:a|0.3::b|6::c|d>
-               
-               use ", " as the separator:
-               <wcrandom[1-3,]:a|0.3::b|6::c|d>
-               
-               use "custom-separator" as the separator:
-               <wcrandom[1-3,custom-separator]:a|0.3::b|6::c|d>
-             */
             T2IPromptHandling.PromptTagProcessors["wcrandom"] = (data, context) =>
             {
                 (int count, string partSeparator) = InterpretPredataForRandom("wcrandom", context.PreData, data, context);
@@ -189,7 +309,15 @@ namespace Spoomples.Extensions.WildcardImporter
                     return null;
                 }
                 string result = "";
-                var set = new WeightedSet(rawVals);
+                var set = new RandomChoicesSet(rawVals, context, ChoiceLabelFilter.Empty);
+                if (set.Choices.Count == 0)
+                {
+                    return result;
+                }
+                
+                var origSet = new RandomChoicesSet(new List<RandomChoice>(set.Choices));
+                origSet.TotalWeight = set.TotalWeight;
+                
                 for (int i = 0; i < count; i++)
                 {
                     string choice = set.TakeRandom(context);
@@ -198,9 +326,10 @@ namespace Spoomples.Extensions.WildcardImporter
                         result += partSeparator;
                     }
                     result += context.Parse(choice).Trim();
-                    if (set.Choices.Count == 0 || set.TotalWeight < 0.01)
+                    if (set.Choices.Count == 0)
                     {
-                        set = new WeightedSet(rawVals);
+                        set.Choices.AddRange(origSet.Choices);
+                        set.TotalWeight = origSet.TotalWeight;
                     }
                 }
                 return result.Trim();
