@@ -183,7 +183,8 @@ namespace Spoomples.Extensions.WildcardImporter
                 // try to parse it as an integer
                 if (int.TryParse(rawString, out int position))
                 {
-                    Position = position;
+                    // convert from 1-based to 0-based
+                    Position = position - 1;
                     return;
                 }
                 
@@ -212,10 +213,11 @@ namespace Spoomples.Extensions.WildcardImporter
 
             public bool IsMatch(RandomChoice choice, int position)
             {
-                if (Position == position)
+                if (Position >= 0)
                 {
-                    return true;
+                    return Position == position;
                 }
+                
                 if (!(PositiveLabels?.All(label => choice.Labels.Contains(label)) ?? true))
                 {
                     return false;
@@ -237,7 +239,7 @@ namespace Spoomples.Extensions.WildcardImporter
                 // string should look like: label1,13,label2+label3,!label4,label5+!label2
                 foreach (var rawEntry in rawString.SplitFast(','))
                 {
-                    Entries.Add(new ChoiceLabelFilterEntry(rawEntry));
+                    Entries.Add(new ChoiceLabelFilterEntry(rawEntry.Trim()));
                 }
             }
 
@@ -481,6 +483,8 @@ namespace Spoomples.Extensions.WildcardImporter
             T2IPromptHandling.PromptTagProcessors["wcwildcard"] = (data, context) =>
             {
                 data = context.Parse(data);
+                (data, var labelFilter) = data.BeforeAndAfter(':');
+                var choiceLabelFilter = new ChoiceLabelFilter(labelFilter);
                 string[] dataParts = data.SplitFast(',', 1);
                 data = dataParts[0];
                 HashSet<string> exclude = [];
@@ -506,7 +510,7 @@ namespace Spoomples.Extensions.WildcardImporter
                 WildcardsHelper.Wildcard wildcard = WildcardsHelper.GetWildcard(card);
                 List<string> usedWildcards = context.Input.ExtraMeta.GetOrCreate("used_wildcards", () => new List<string>()) as List<string>;
                 usedWildcards.Add(card);
-                var set = new RandomChoicesSet(wildcard.Options, context, ChoiceLabelFilter.Empty, exclude);
+                var set = new RandomChoicesSet(wildcard.Options, context, choiceLabelFilter, exclude);
                 if (set.Choices.Count == 0)
                 {
                     return "";

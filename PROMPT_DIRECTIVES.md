@@ -56,10 +56,12 @@ You can conditionally exclude options from the list by adding an `if` expression
 
 An enhanced version of SwarmUI's built-in `<wildcard>` directive with support for custom separators and advanced count/range syntax.
 
-**Basic Syntax:**
-```
-<wcwildcard:cardname>
-```
+**Features:**
+- **Custom Separators**: Specify separator after count (default is `' '`)
+- **Multiple Selections**: Use `[count]` or `[min-max]` to select multiple options
+- **Option Exclusion**: Use `,not=option1|option2` to exclude specific wildcard options
+- **No Repetition**: Avoids repeating the same option unless count exceeds available options
+- **Label-Based Filtering**: Pass labels in the options section to filter wildcard choices
 
 **With Count and Custom Separators:**
 ```
@@ -75,41 +77,58 @@ An enhanced version of SwarmUI's built-in `<wildcard>` directive with support fo
 <wcwildcard[2]:cardname,not=unwanted1|unwanted2>
 ```
 
-**Features:**
-- **Custom Separators**: Specify separator after count (default is `' '`)
-- **Multiple Selections**: Use `[count]` or `[min-max]` to select multiple options
-- **Option Exclusion**: Use `,not=option1|option2` to exclude specific wildcard options
-- **No Repetition**: Avoids repeating the same option unless count exceeds available options
+**With Label Filtering:**
+
+To perform label-based filtering, add a list of labels wrapped in parentheses after the (optional) exclusion clause.
+The filter is a comma-separated list of an integer (positional choice index; one-based) or choice label.
+You can also compound them with +. That is, the comma-separated items act as an OR and the + inside them as an AND.
+A label can be prefixed with a `!` to exclude it.
+When the wildcard is evaluated, the wildcard choices are filtered to only those that match the filter.
+
+**Note**: The label-filter string is processed for tags, which means you can use variables and other constructs to create your label filter.
+
+```
+<wcwildcard:cardname:contemporary,futuristic> # only include choices that have either the contemporary or futuristic label
+<wcwildcard:cardname:!futuristic> # Only include choices that do not have the futuristic label
+<wcwildcard:cardname:contemporary,futuristic+!alien> # Include choice that have the contemporary label, or have the futuristic label without the alien label
+<wcwildcard:cardname:42,futuristic> # Include the 42nd choice no matter what labels it has, as well as the ones with futuristic label.
+<wcwildcard:cardname:<var:genre>+<var:theme>> # Include choices that have labels matching the genre and theme variables
+```
 
 **Examples:**
 - `<wcwildcard[2]:animals>` → might return `"cat dog"`
 - `<wcwildcard[1-3,]:colors>` → might return `"red, blue, green"`
 - `<wcwildcard[2, and ]:styles>` → might return `"realistic and detailed"`
 - `<wcwildcard:characters,not=villain|monster>` → excludes villain and monster options
+- `<wcwildcard:characters,not=villain|monster:contemporary>` → excludes villain and monster options, filter options that are missing the contemporary label
+- `<wcwildcard[2, and ]:styles:<var:genre>+<var:theme>>` → might return `"realistic and detailed"`.  Will only consider options that have labels matching the genre and theme variables.
 
 #### Wildcard Choices
 
 `wcwildcard` also supports enhanced formats for the choices within a wildcard file.  Each line in the file (a choice) supports
-the same syntax as the choices in `<wcrandom>`.
+the same syntax as the choices in `<wcrandom>`, with the addition of labels (which can be used for filtering).
 
 **Features:**
 - **Weighted Selection**: Use `weight::option` syntax to control probability
 - **Conditional Options**: Exclude options based upon variable state using `if` expression syntax
+- **Label Filtering**: Assign labels to options so that caller can exclude or include the choices based on label filter they provide.
 
 **Syntax:**
 ```
-[[weight] [if condition]::]value
+[[(label1,label2,...)][weight] [if condition]::]value
 ```
 
 **Example Wildcard File:**
 
-| Example                          | Description                                                                  | 
-|----------------------------------|------------------------------------------------------------------------------|
-| `white`                          | Simple wildcard choice with no options (weight = 1.0)                        |
-| `0.3::red`                       | Weighted choice (weight = 0.3)                                               |
-| `if luck eq "normal"::blue`      | Conditional choice (choice not available unless `luck` variable == "normal") |
-| `0.3 if luck eq "normal"::green` | Weighted conditional choice                                                  |
-
+| Example                                    | Description                                                                  | 
+|--------------------------------------------|------------------------------------------------------------------------------|
+| `white`                                    | Simple wildcard choice with no options (weight = 1.0)                        |
+| `0.3::red`                                 | Weighted choice (weight = 0.3)                                               |
+| `if luck eq "normal"::blue`                | Conditional choice (choice not available unless `luck` variable == "normal") |
+| `0.3 if luck eq "normal"::green`           | Weighted conditional choice                                                  |
+| `(primary)::white`                         | Wildcard choice with a single label: primary                                 |
+| `(primary, monochromatic)::white`          | Wildcard choice with a two labels: primary, monochromatic                    |
+| `(primary) 0.3 if luck eq "normal"::green` | Weighted conditional choice with a single label                              |
 
 ## Negative Prompt Management
 
