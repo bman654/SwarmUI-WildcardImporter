@@ -112,9 +112,9 @@ namespace Spoomples.Extensions.WildcardImporter
         {
             public RandomChoice(string rawString) : this(rawString, 1.0, null, new HashSet<string>())
             {
-                var (rawOpts, value) = rawString.BeforeAndAfter("::");
-                if (value != "")
+                if (rawString.Contains("::"))
                 {
+                    var (rawOpts, value) = rawString.BeforeAndAfter("::");
                     Value = value;
                     
                     // parse the options, which looks like:
