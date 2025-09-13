@@ -15,6 +15,8 @@ namespace Spoomples.Extensions.WildcardImporter
         public static readonly string MatchState_Open = "open";
         public static readonly string MatchState_Closed = "closed";
         public static ConditionalWeakTable<T2IPromptHandling.PromptTagContext, string> CurrentMatchState = new ();
+        public static ConditionalWeakTable<Dictionary<string, string>, Dictionary<string, Stack<string>>> VariableStack = new();
+        public static ConditionalWeakTable<Dictionary<string, string>, Dictionary<string, Stack<string>>> MacroStack = new();
         
         public static ThreadLocal<string> CurrentMatchLength = new (() => "");
 
@@ -72,6 +74,8 @@ namespace Spoomples.Extensions.WildcardImporter
             AddNegativePrompt();
             AddVariable();
             AddMacro();
+            PushPopVariable();
+            PushPopMacro();
             Match();
             EnhancedRandom();
             EnhancedWildcard();
@@ -368,6 +372,98 @@ namespace Spoomples.Extensions.WildcardImporter
             };
 
             T2IPromptHandling.PromptTagLengthEstimators["wcnegative"] = (data, context) => "";
+        }
+
+        private static void PushPopVariable()
+        {
+            /*
+             * <wcpushvar[name]:value>
+             * <wcpopvar:name>
+             */
+            T2IPromptHandling.PromptTagProcessors["wcpushvar"] = (data, context) =>
+            {
+                var name = context.PreData;
+                if (string.IsNullOrWhiteSpace(name))
+                {
+                    context.TrackWarning($"A variable name is required when using wcpushvar.");
+                    return null;
+                }
+                
+                var dict = VariableStack.GetValue(context.Variables, _ => new Dictionary<string, Stack<string>>());
+                var stack = dict.GetOrCreate(name, () => new Stack<string>());
+                stack.Push(context.Variables.GetValueOrDefault(name, ""));
+                context.Variables[name] = context.Parse(data);
+                return "";
+            };
+            T2IPromptHandling.PromptTagLengthEstimators["wcpushvar"] = (data, context) => "";
+            T2IPromptHandling.PromptTagProcessors["wcpopvar"] = (data, context) =>
+            {
+                var name = data;
+                if (string.IsNullOrWhiteSpace(name))
+                {
+                    context.TrackWarning($"A variable name is required when using wcpopvar.");
+                    return null;
+                }
+                var dict = VariableStack.GetValue(context.Variables, _ => new Dictionary<string, Stack<string>>());
+                var stack = dict.GetOrCreate(name, () => new Stack<string>());
+                if (stack.Count == 0)
+                {
+                    context.TrackWarning($"Attempt to pop from empty stack for variable '{name}'.");
+                    context.Variables[name] = "";
+                }
+                else
+                {
+                    context.Variables[name] = stack.Pop();
+                }
+                return "";
+            };
+            T2IPromptHandling.PromptTagLengthEstimators["wcpopvar"] = (data, context) => "";
+        }
+
+        private static void PushPopMacro()
+        {
+            /*
+             * <wcpushmacro[name]:value>
+             * <wcpopmacro:name>
+             */
+            T2IPromptHandling.PromptTagProcessors["wcpushmacro"] = (data, context) =>
+            {
+                var name = context.PreData;
+                if (string.IsNullOrWhiteSpace(name))
+                {
+                    context.TrackWarning($"A macro name is required when using wcpushmacro.");
+                    return null;
+                }
+
+                var dict = MacroStack.GetValue(context.Macros, _ => new Dictionary<string, Stack<string>>());
+                var stack = dict.GetOrCreate(name, () => new Stack<string>());
+                stack.Push(context.Macros.GetValueOrDefault(name, ""));
+                context.Macros[name] = data;
+                return "";
+            };
+            T2IPromptHandling.PromptTagLengthEstimators["wcpushmacro"] = (data, context) => "";
+            T2IPromptHandling.PromptTagProcessors["wcpopmacro"] = (data, context) =>
+            {
+                var name = data;
+                if (string.IsNullOrWhiteSpace(name))
+                {
+                    context.TrackWarning($"A macro name is required when using wcpopmacro.");
+                    return null;
+                }
+                var dict = MacroStack.GetValue(context.Macros, _ => new Dictionary<string, Stack<string>>());
+                var stack = dict.GetOrCreate(name, () => new Stack<string>());
+                if (stack.Count == 0)
+                {
+                    context.TrackWarning($"Attempt to pop from empty stack for macro '{name}'.");
+                    context.Macros[name] = "";
+                }
+                else
+                {
+                    context.Macros[name] = stack.Pop();
+                }
+                return "";
+            };
+            T2IPromptHandling.PromptTagLengthEstimators["wcpopmacro"] = (data, context) => "";
         }
 
         private static void AddVariable()

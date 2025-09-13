@@ -173,6 +173,45 @@ Appends or prepends content to existing variables.
 - `<setvar[style]:portrait>` then `<wcaddvar[style]:, detailed>` → style becomes "portrait, detailed"
 - `<wcaddvar[tags,prepend]:masterpiece, >` → prepends to existing tags variable
 
+### `<wcpushvar>` and `<wcpopvar>`
+
+Provides stack-based variable management for temporary variable modifications.
+
+**Syntax:**
+```
+<wcpushvar[variable_name]:new_value>
+<wcpopvar:variable_name>
+```
+
+**Behavior:**
+- `<wcpushvar>` saves the current value of a variable to a stack and sets a new value
+- `<wcpopvar>` restores the previous value from the stack
+- If the variable doesn't exist when pushed, an empty string is saved to the stack
+- If the stack is empty when popping, the variable is set to an empty string and a warning is logged
+- Useful for temporary variable modifications within nested contexts (usually wrapped around calls to `<wcwildcard>`)
+- Each variable has its own independent stack
+
+**Examples:**
+```
+<setvar[mood]:happy>
+<wcpushvar[mood]:sad>  <!-- mood is now "sad", "happy" is saved on stack -->
+<var:mood>            <!-- outputs "sad" -->
+<wcpopvar:mood>       <!-- mood is restored to "happy" -->
+<var:mood>            <!-- outputs "happy" -->
+```
+
+**Nested Usage:**
+```
+<setvar[style]:realistic>
+<wcpushvar[style]:anime>
+  <wcpushvar[style]:cartoon>
+    <var:style>         <!-- outputs "cartoon" -->
+  <wcpopvar:style>      <!-- restored to "anime" -->
+  <var:style>           <!-- outputs "anime" -->
+<wcpopvar:style>        <!-- restored to "realistic" -->
+<var:style>             <!-- outputs "realistic" -->
+```
+
 ## Macro Management
 
 ### `<wcaddmacro>`
@@ -196,6 +235,46 @@ Appends or prepends content to existing macros.
 **Examples:**
 - `<setmacro[color]:<random:red|blue|green>>` then `<wcaddmacro[color]:, vibrant>` → adds ", vibrant" to each color selection
 - `<wcaddmacro[quality,prepend]:best quality, >` → prepends to existing quality macro
+
+### `<wcpushmacro>` and `<wcpopmacro>`
+
+Provides stack-based macro management for temporary macro modifications.
+
+**Syntax:**
+```
+<wcpushmacro[macro_name]:new_value>
+<wcpopmacro:macro_name>
+```
+
+**Behavior:**
+- `<wcpushmacro>` saves the current value of a macro to a stack and sets a new value
+- `<wcpopmacro>` restores the previous value from the stack
+- If the macro doesn't exist when pushed, an empty string is saved to the stack
+- If the stack is empty when popping, the macro is set to an empty string and a warning is logged
+- The new macro value is stored as-is (not evaluated immediately)
+- Useful for temporary macro modifications within nested contexts (usually wrapped around calls to `<wcwildcard>`)
+- Each macro has its own independent stack
+
+**Examples:**
+```
+<setmacro[quality]:<random:best|high> quality>
+<wcpushmacro[quality]:low quality>  <!-- macro is now "low quality", original saved on stack -->
+<macro:quality>                     <!-- outputs "low quality" -->
+<wcpopmacro:quality>                <!-- macro is restored to "<random:best|high> quality" -->
+<macro:quality>                     <!-- outputs "best quality" or "high quality" -->
+```
+
+**Nested Usage:**
+```
+<setmacro[style]:<random:realistic|detailed>>
+<wcpushmacro[style]:<random:anime|manga>>
+  <wcpushmacro[style]:cartoon>
+    <macro:style>         <!-- outputs "cartoon" -->
+  <wcpopmacro:style>      <!-- restored to "<random:anime|manga>" -->
+  <macro:style>           <!-- outputs "anime" or "manga" -->
+<wcpopmacro:style>        <!-- restored to "<random:realistic|detailed>" -->
+<macro:style>             <!-- outputs "realistic" or "detailed" -->
+```
 
 ## Conditional Logic
 

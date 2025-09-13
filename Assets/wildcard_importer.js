@@ -784,6 +784,42 @@ promptTabComplete.registerPrefix('wcaddmacro[macro_name]', 'Appends or prepends 
     ];
 });
 
+promptTabComplete.registerPrefix('wcpushvar[var_name]', 'Saves current variable value to stack and sets new value', (prefix) => {
+    return [
+        '\nProvides stack-based variable management for temporary modifications.',
+        '\nSyntax: "<wcpushvar[variable_name]:new_value>"',
+        '\nUse with <wcpopvar:variable_name> to restore the previous value.',
+        '\nUseful for temporary variable changes within nested contexts.'
+    ];
+});
+
+promptTabComplete.registerPrefix('wcpopvar', 'Restores previous variable value from stack', (prefix) => {
+    return [
+        '\nRestores the previous value of a variable from its stack.',
+        '\nSyntax: "<wcpopvar:variable_name>"',
+        '\nUse after <wcpushvar> to restore the original value.',
+        '\nSets variable to empty string if stack is empty.'
+    ];
+});
+
+promptTabComplete.registerPrefix('wcpushmacro[macro_name]', 'Saves current macro value to stack and sets new value', (prefix) => {
+    return [
+        '\nProvides stack-based macro management for temporary modifications.',
+        '\nSyntax: "<wcpushmacro[macro_name]:new_value>"',
+        '\nUse with <wcpopmacro:macro_name> to restore the previous value.',
+        '\nUseful for temporary macro changes within nested contexts.'
+    ];
+});
+
+promptTabComplete.registerPrefix('wcpopmacro', 'Restores previous macro value from stack', (prefix) => {
+    return [
+        '\nRestores the previous value of a macro from its stack.',
+        '\nSyntax: "<wcpopmacro:macro_name>"',
+        '\nUse after <wcpushmacro> to restore the original value.',
+        '\nSets macro to empty string if stack is empty.'
+    ];
+});
+
 promptTabComplete.registerPrefix('wcmatch', 'Provides conditional logic for prompts using expression evaluation', (prefix) => {
     return [
         '\nUse with <wccase> blocks to create conditional content.',
