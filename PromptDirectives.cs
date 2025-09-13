@@ -116,7 +116,12 @@ namespace Spoomples.Extensions.WildcardImporter
         {
             public RandomChoice(string rawString) : this(rawString, 1.0, null, new HashSet<string>())
             {
-                if (rawString.Contains("::"))
+                var tagPosition = rawString.IndexOf('<');
+                if (tagPosition == -1)
+                {
+                    tagPosition = rawString.Length;
+                }
+                if (rawString.Substring(0, tagPosition).Contains("::"))
                 {
                     var (rawOpts, value) = rawString.BeforeAndAfter("::");
                     Value = value;
@@ -240,6 +245,11 @@ namespace Spoomples.Extensions.WildcardImporter
             public static ChoiceLabelFilter Empty => new(new List<ChoiceLabelFilterEntry>());
             public ChoiceLabelFilter(string rawString) : this(new List<ChoiceLabelFilterEntry>())
             {
+                rawString = rawString.Trim();
+                if (rawString == "")
+                {
+                    return;
+                }
                 // string should look like: label1,13,label2+label3,!label4,label5+!label2
                 foreach (var rawEntry in rawString.SplitFast(','))
                 {
