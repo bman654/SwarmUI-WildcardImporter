@@ -1284,7 +1284,11 @@ namespace Spoomples.Extensions.WildcardImporter
                 // Log debug info about prefix flags if present
                 if (!string.IsNullOrEmpty(prefixFlags))
                 {
-                    Logs.Debug($"WildcardProcessor: Found prefix flags '{prefixFlags}' in variant {fullMatch} - ignoring as requested");
+                    prefixFlags = prefixFlags.Replace("~", "").Replace("o", "");
+                    if (!string.IsNullOrEmpty(prefixFlags))
+                    {
+                        task.AddWarning($"Variant flags '{prefixFlags}' not supported.  Ignoring.");
+                    }
                 }
                 
                 // Check if there's a custom separator (pattern: separator$$options)
