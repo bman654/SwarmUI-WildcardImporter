@@ -45,6 +45,12 @@ namespace Spoomples.Extensions.WildcardImporter
             TestWildcardsInVariants();
             TestGlobWildcards();
             TestAdvancedWildcardOptions();
+            
+            // Test label filtering
+            TestLabelFiltering();
+            
+            // Test wildcard choice labels
+            TestWildcardChoiceLabels();
 
             // Test variables
             TestVariableAssignments();
@@ -472,6 +478,220 @@ namespace Spoomples.Extensions.WildcardImporter
             AssertTransform("__@$$colors__", 
                            "<wcwildcard:colors>",
                            "Just prefix flags wildcard");
+        }
+
+        private static void TestLabelFiltering()
+        {
+            // Basic label filter with single quotes: __wildcard'filter'__
+            AssertTransform("__colors'primary'__ are nice", 
+                           "<wcpushmacro[wcfilter_colors]:primary><wcwildcard:colors:primary><wcpopmacro:wcfilter_colors> are nice",
+                           "Basic label filter with single quotes");
+
+            // Basic label filter with double quotes: __wildcard\"filter\"__
+            AssertTransform("__colors\"primary\"__ are nice", 
+                           "<wcpushmacro[wcfilter_colors]:primary><wcwildcard:colors:primary><wcpopmacro:wcfilter_colors> are nice",
+                           "Basic label filter with double quotes");
+
+            // Label filter with quantifier: __2$$wildcard'filter'__
+            AssertTransform("__2$$colors'primary'__ work well", 
+                           "<wcpushmacro[wcfilter_colors]:primary><wcwildcard[2,]:colors:primary><wcpopmacro:wcfilter_colors> work well",
+                           "Label filter with quantifier");
+
+            // Label filter with range quantifier: __2-3$$wildcard'filter'__
+            AssertTransform("__2-3$$colors'bright'__ are vibrant", 
+                           "<wcpushmacro[wcfilter_colors]:bright><wcwildcard[2-3,]:colors:bright><wcpopmacro:wcfilter_colors> are vibrant",
+                           "Label filter with range quantifier");
+
+            // Label filter with custom separator: __2$$ and $$wildcard'filter'__
+            AssertTransform("__2$$ and $$colors'warm'__ blend nicely", 
+                           "<wcpushmacro[wcfilter_colors]:warm><wcwildcard[2, and ]:colors:warm><wcpopmacro:wcfilter_colors> blend nicely",
+                           "Label filter with custom separator");
+
+            // Filter inheritance with ^wildcard syntax: __target'^source'__
+            AssertTransform("__styles'^colors'__ match perfectly", 
+                           "<wcpushmacro[wcfilter_styles]:<wcmacro:wcfilter_colors>><wcwildcard:styles:<wcmacro:wcfilter_colors>><wcpopmacro:wcfilter_styles> match perfectly",
+                           "Filter inheritance with ^wildcard syntax");
+
+            // Filter definition with #wildcard syntax: __source'#primary,bright'__
+            AssertTransform("__colors'#primary,bright'__ are defined", 
+                           "<wcpushmacro[wcfilter_colors]:primary,bright><wcwildcard:colors><wcpopmacro:wcfilter_colors> are defined",
+                           "Filter definition with #wildcard syntax");
+
+            // Complex filter with multiple labels: __wildcard'label1,label2+label3'__
+            AssertTransform("__themes'contemporary,futuristic+!alien'__ work", 
+                           "<wcpushmacro[wcfilter_themes]:contemporary,futuristic+!alien><wcwildcard:themes:contemporary,futuristic+!alien><wcpopmacro:wcfilter_themes> work",
+                           "Complex filter with multiple labels");
+
+            // Filter with numeric index: __wildcard'42,primary'__
+            AssertTransform("__items'1,special'__ are selected", 
+                           "<wcpushmacro[wcfilter_items]:2,special><wcwildcard:items:2,special><wcpopmacro:wcfilter_items> are selected",
+                           "Filter with numeric index");
+
+            // Filter with variables: __wildcard'${genre}+${theme}'__
+            AssertTransform("__styles'<macro:genre>+<macro:theme>'__ match", 
+                           "<wcpushmacro[wcfilter_styles]:<macro:genre>+<macro:theme>><wcwildcard:styles:<macro:genre>+<macro:theme>><wcpopmacro:wcfilter_styles> match",
+                           "Filter with variables");
+
+            // Label filter with glob patterns: __colors*'bright'__
+            AssertTransform("__colors*'warm'__ are nice", 
+                           "<wcrandom:<wcwildcard:colors-cold:warm>|<wcwildcard:colors-warm:warm>> are nice",
+                           "Label filter with glob patterns",
+                           CreateMockFiles("colors-cold", "colors-warm"));
+
+            // Label filter with glob patterns and quantifier: __2$$colors*'bright'__
+            AssertTransform("__2$$colors*'bright'__ work well", 
+                           "<wcrandom[2,]:<wcwildcard:colors-cold:bright>|<wcwildcard:colors-warm:bright>> work well",
+                           "Label filter with glob patterns and quantifier",
+                           CreateMockFiles("colors-cold", "colors-warm"));
+
+            // Empty filter (should still generate macro management): __wildcard''__
+            AssertTransform("__colors''__ are basic", 
+                           "<wcpushmacro[wcfilter_colors]:><wcwildcard:colors:><wcpopmacro:wcfilter_colors> are basic",
+                           "Empty filter");
+
+            // Filter with path wildcards: __path/to/wildcard'filter'__
+            AssertTransform("__themes/modern'sleek'__ designs", 
+                           "<wcpushmacro[wcfilter_themes_modern]:sleek><wcwildcard:themes/modern:sleek><wcpopmacro:wcfilter_themes_modern> designs",
+                           "Filter with path wildcards");
+
+            // Multiple filtered wildcards in one line
+            AssertTransform("__colors'bright'__ and __textures'smooth'__ combine", 
+                           "<wcpushmacro[wcfilter_colors]:bright><wcwildcard:colors:bright><wcpopmacro:wcfilter_colors> and <wcpushmacro[wcfilter_textures]:smooth><wcwildcard:textures:smooth><wcpopmacro:wcfilter_textures> combine",
+                           "Multiple filtered wildcards");
+
+            // Filter inheritance chain: __target1'^source'__ then __target2'^target1'__
+            AssertTransform("__styles'^colors'__ then __moods'^styles'__", 
+                           "<wcpushmacro[wcfilter_styles]:<wcmacro:wcfilter_colors>><wcwildcard:styles:<wcmacro:wcfilter_colors>><wcpopmacro:wcfilter_styles> then <wcpushmacro[wcfilter_moods]:<wcmacro:wcfilter_styles>><wcwildcard:moods:<wcmacro:wcfilter_styles>><wcpopmacro:wcfilter_moods>",
+                           "Filter inheritance chain");
+
+            // Filter definition followed by inheritance: __source'#primary'__ then __target'^source'__
+            AssertTransform("__colors'#primary'__ then __styles'^colors'__", 
+                           "<wcpushmacro[wcfilter_colors]:primary><wcwildcard:colors><wcpopmacro:wcfilter_colors> then <wcpushmacro[wcfilter_styles]:<wcmacro:wcfilter_colors>><wcwildcard:styles:<wcmacro:wcfilter_colors>><wcpopmacro:wcfilter_styles>",
+                           "Filter definition followed by inheritance");
+
+            // Filter with prefix flags: __@~ro2$$wildcard'filter'__
+            AssertTransform("__@~ro2$$themes'modern'__ are selected", 
+                           "<wcpushmacro[wcfilter_themes]:modern><wcwildcard[2,]:themes:modern><wcpopmacro:wcfilter_themes> are selected",
+                           "Filter with prefix flags");
+
+            // Filter with variants in filter content: __wildcard'{primary|secondary}'__
+            AssertTransform("__colors'<wcrandom:primary|secondary>'__ work", 
+                           "<wcpushmacro[wcfilter_colors]:<wcrandom:primary|secondary>><wcwildcard:colors:<wcrandom:primary|secondary>><wcpopmacro:wcfilter_colors> work",
+                           "Filter with variants in filter content");
+
+            // Edge case: filter with special characters: __wildcard'label+with-special_chars'__
+            AssertTransform("__items'special-label+with_chars'__ selected", 
+                           "<wcpushmacro[wcfilter_items]:special-label+with_chars><wcwildcard:items:special-label+with_chars><wcpopmacro:wcfilter_items> selected",
+                           "Filter with special characters");
+
+            // Edge case: no filter should work normally: __wildcard__
+            AssertTransform("__colors__ are normal", 
+                           "<wcwildcard:colors> are normal",
+                           "No filter works normally");
+
+            // Edge case: filter with advanced wildcard options and glob: __2$$ and $$colors*'warm'__
+            AssertTransform("__2$$ and $$colors*'warm'__ work", 
+                           "<wcrandom[2, and ]:<wcwildcard:colors-cold:warm>|<wcwildcard:colors-warm:warm>> work",
+                           "Filter with advanced options and glob",
+                           CreateMockFiles("colors-cold", "colors-warm"));
+        }
+
+        private static void TestWildcardChoiceLabels()
+        {
+            // Basic single-quoted labels with :: before <
+            AssertTransform("'primary,bright'::red car",
+                           "(primary,bright)::red car",
+                           "Single-quoted labels converted to parentheses");
+
+            // Basic double-quoted labels with :: before <
+            AssertTransform("\"warm,vibrant\"::blue sky",
+                           "(warm,vibrant)::blue sky",
+                           "Double-quoted labels converted to parentheses");
+
+            // Labels with :: before < directive
+            AssertTransform("'modern,sleek'::car <wcrandom:red|blue>",
+                           "(modern,sleek)::car <wcrandom:red|blue>",
+                           "Labels with :: before directive");
+
+            // Labels with complex content after ::
+            AssertTransform("'fantasy,magical'::wizard <wcwildcard:spells> casting",
+                           "(fantasy,magical)::wizard <wcwildcard:spells> casting",
+                           "Labels with complex content after ::");
+
+            // Multiple labels separated by commas
+            AssertTransform("'tag1,tag2,tag3'::content here",
+                           "(tag1,tag2,tag3)::content here",
+                           "Multiple labels separated by commas");
+
+            // Labels with spaces
+            AssertTransform("'modern car,fast vehicle'::racing <wcrandom:red|blue>",
+                           "(modern car,fast vehicle)::racing <wcrandom:red|blue>",
+                           "Labels with spaces");
+
+            // Labels with special characters
+            AssertTransform("'sci-fi,high-tech'::robot design",
+                           "(sci-fi,high-tech)::robot design",
+                           "Labels with special characters");
+
+            // Empty labels should still be converted
+            AssertTransform("''::empty labels test",
+                           "()::empty labels test",
+                           "Empty labels converted to empty parentheses");
+
+            // Whitespace before labels should be preserved
+            AssertTransform("  'spaced,labels'::content",
+                           "  (spaced,labels)::content",
+                           "Whitespace before labels preserved");
+
+            // No :: in line - should not change
+            AssertTransform("'labels'without double colon",
+                           "'labels'without double colon",
+                           "No :: in line - no conversion");
+
+            // :: after < - should not change
+            AssertTransform("<wcrandom:red|blue> 'labels'::after directive",
+                           "<wcrandom:red|blue> 'labels'::after directive",
+                           ":: after < - no conversion");
+
+            // No quotes at start - should not change
+            AssertTransform("unquoted::content here",
+                           "unquoted::content here",
+                           "No quotes at start - no conversion");
+
+            // Quotes not at start - should not change
+            AssertTransform("prefix 'labels'::content",
+                           "prefix 'labels'::content",
+                           "Quotes not at start - no conversion");
+
+            // Unclosed quotes - should not change
+            AssertTransform("'unclosed::content here",
+                           "'unclosed::content here",
+                           "Unclosed quotes - no conversion");
+
+            // Mixed quote types - only process if properly closed
+            AssertTransform("'mixed\"::content here",
+                           "'mixed\"::content here",
+                           "Mixed quote types - no conversion");
+
+            // Real-world example with wildcard processing
+            AssertTransform("'portrait,headshot'::beautiful woman with <wcwildcard:hair_colors> hair",
+                           "(portrait,headshot)::beautiful woman with <wcwildcard:hair_colors> hair",
+                           "Real-world example with wildcard processing");
+
+            // Complex example with multiple directives
+            AssertTransform("'anime,kawaii'::girl with <wcrandom:red|blue> hair and <wcwildcard:expressions>",
+                           "(anime,kawaii)::girl with <wcrandom:red|blue> hair and <wcwildcard:expressions>",
+                           "Complex example with multiple directives");
+
+            // Labels with numeric content
+            AssertTransform("'1girl,solo'::anime character",
+                           "(1girl,solo)::anime character",
+                           "Labels with numeric content");
+
+            // Labels with underscores and hyphens
+            AssertTransform("'high_quality,ultra-detailed'::masterpiece artwork",
+                           "(high_quality,ultra-detailed)::masterpiece artwork",
+                           "Labels with underscores and hyphens");
         }
 
         #endregion
@@ -1339,7 +1559,7 @@ namespace Spoomples.Extensions.WildcardImporter
                     throw new Exception("ProcessWildcardLine method not found");
                 }
                 
-                string result = (string)method.Invoke(processor, new object[] { input, taskId });
+                string result = (string)method.Invoke(processor, new object[] { input, taskId, true });
 
                 if (result == expected)
                 {

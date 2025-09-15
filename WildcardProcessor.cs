@@ -300,7 +300,7 @@ namespace Spoomples.Extensions.WildcardImporter
                 List<string> processedLines = new List<string>();
                 foreach (var line in lines)
                 {
-                    processedLines.Add(ProcessWildcardLine(line, taskId));
+                    processedLines.Add(ProcessWildcardLine(line, taskId, true));
                 }
                 
                 // Regular text file
@@ -320,7 +320,7 @@ namespace Spoomples.Extensions.WildcardImporter
             Logs.Info($"Completed processing all files with wildcard references");
         }
 
-        private string ProcessWildcardLine(string line, string taskId)
+        private string ProcessWildcardLine(string line, string taskId, bool root = false)
         {
             Logs.Verbose($"WildcardProcessor: ProcessWildcardLine called with line='{line}'");
             
@@ -379,7 +379,16 @@ namespace Spoomples.Extensions.WildcardImporter
             //      We cannot emit weights.  In our system, all options have weight=1.  So when we encounter this we need to compute the LCM and emit copies of each option so that when you add up all the 1 weights, you get the same relative weights as the original  
 
             // Process all variants with proper brace matching, including nested variants
-            return ProcessVariants(line, _tasks[taskId]);
+            line = ProcessVariants(line, _tasks[taskId]);
+
+            if (root)
+            {
+                // Post-process labels in wildcard choices
+                // Check if the line has "::" before the first "<" and starts with quoted labels
+                line = ProcessWildcardChoiceLabels(line);
+            }
+
+            return line;
         }
 
         private string ProcessBreakWords(string input)
@@ -418,6 +427,55 @@ namespace Spoomples.Extensions.WildcardImporter
             return result.ToString();
         }
         
+        /// <summary>
+        /// Post-processes wildcard choice labels by converting quoted labels to parentheses.
+        /// If the line contains "::" before the first "<" and starts with quoted labels,
+        /// replaces 'labels' or "labels" with (labels).
+        /// </summary>
+        /// <param name="line">The processed line to check for wildcard choice labels.</param>
+        /// <returns>The line with quoted labels converted to parentheses.</returns>
+        private string ProcessWildcardChoiceLabels(string line)
+        {
+            // Check if the line has "::" before the first "<"
+            int firstAngleBracket = line.IndexOf('<');
+            int doubleColon = line.IndexOf("::");
+            
+            if (doubleColon == -1 || (firstAngleBracket != -1 && doubleColon >= firstAngleBracket))
+            {
+                // No "::" before first "<", or no "::" at all
+                return line;
+            }
+            
+            // Check if the line starts with quoted labels
+            string trimmedLine = line.TrimStart();
+            
+            // Check for single quotes: 'labels'
+            if (trimmedLine.StartsWith("'") && trimmedLine.IndexOf("'", 1) > 0)
+            {
+                int endQuote = trimmedLine.IndexOf("'", 1);
+                string labels = trimmedLine.Substring(1, endQuote - 1);
+                string beforeLabels = line.Substring(0, line.Length - trimmedLine.Length);
+                string afterLabels = trimmedLine.Substring(endQuote + 1);
+                
+                Logs.Debug($"WildcardProcessor: Converting single-quoted labels '{labels}' to ({labels})");
+                return beforeLabels + "(" + labels + ")" + afterLabels;
+            }
+            
+            // Check for double quotes: "labels"
+            if (trimmedLine.StartsWith("\"") && trimmedLine.IndexOf("\"", 1) > 0)
+            {
+                int endQuote = trimmedLine.IndexOf("\"", 1);
+                string labels = trimmedLine.Substring(1, endQuote - 1);
+                string beforeLabels = line.Substring(0, line.Length - trimmedLine.Length);
+                string afterLabels = trimmedLine.Substring(endQuote + 1);
+                
+                Logs.Debug($"WildcardProcessor: Converting double-quoted labels \"{labels}\" to ({labels})");
+                return beforeLabels + "(" + labels + ")" + afterLabels;
+            }
+            
+            // No quoted labels found at the start
+            return line;
+        }
 
         private string ProcessVariables(string input, ProcessingTask task)
         {
@@ -1394,14 +1452,26 @@ namespace Spoomples.Extensions.WildcardImporter
             string quantityString = "";
             string customSeparator = "";
             string wildcardPath = content;
+            string labelFilter = "";
+            bool hasFilterSpecified = false;
+            
+            // Parse label filter first (before processing quantifiers)
+            // Look for 'filter' or "filter" at the end of the content
+            var filterMatch = System.Text.RegularExpressions.Regex.Match(content, @"^(.*?)(['""])([^'""]*?)\2$");
+            if (filterMatch.Success)
+            {
+                wildcardPath = filterMatch.Groups[1].Value;
+                labelFilter = filterMatch.Groups[3].Value;
+                hasFilterSpecified = true;
+            }
             
             // Check if wildcard has advanced options (same syntax as variants)
             // Pattern: __@~ro2-3$$ custom separator $$wildcardpath__
-            if (content.Contains("$$"))
+            if (wildcardPath.Contains("$$"))
             {
                 // Try to match the quantifier pattern with optional prefix flags and optional numeric value
                 // Pattern handles: [~@ro][2]$$wildcardpath or [~@ro][2]$$separator$$wildcardpath
-                var match = System.Text.RegularExpressions.Regex.Match(content, @"^(?<prefixFlags>[~@ro]*)(?<numberPart>(?:\d+-\d+|-\d+|\d+)?)\$\$(?<remainingPart>.*)$");
+                var match = System.Text.RegularExpressions.Regex.Match(wildcardPath, @"^(?<prefixFlags>[~@ro]*)(?<numberPart>(?:\d+-\d+|-\d+|\d+)?)\$\$(?<remainingPart>.*)$");
                 
                 if (match.Success)
                 {
@@ -1473,21 +1543,88 @@ namespace Spoomples.Extensions.WildcardImporter
             // Recursively process the reference to handle nested syntax like ${variable}
             string processedReference = ProcessWildcardLine(wildcardPath, taskId);
             
+            // Convert 0-based numeric filters to 1-based
+            if (hasFilterSpecified && !string.IsNullOrEmpty(labelFilter))
+            {
+                labelFilter = ConvertNumericFiltersTo1Based(labelFilter);
+            }
+            
+            // Handle filter inheritance logic (^wildcard and #wildcard)
+            string finalFilter = labelFilter;
+            if (hasFilterSpecified && !string.IsNullOrEmpty(labelFilter))
+            {
+                if (labelFilter.StartsWith("^"))
+                {
+                    // ^wildcard syntax - inherit filter from another wildcard
+                    string sourceWildcard = labelFilter.Substring(1);
+                    finalFilter = $"<wcmacro:wcfilter_{sourceWildcard.Replace("/", "_")}>";
+                }
+                else if (labelFilter.StartsWith("#"))
+                {
+                    // #wildcard syntax - don't apply filter to current wildcard but store for inheritance
+                    string filterContent = labelFilter.Substring(1);
+                    string filterMacroName = $"wcfilter_{processedReference.Replace("/", "_")}";
+                    string result = $"<wcpushmacro[{filterMacroName}]:{filterContent}>";
+                    
+                    // Generate the wildcard without filter
+                    if (processedReference.Contains('*'))
+                    {
+                        result += ProcessGlobWildcardRef(quantityString, processedReference, taskId, "");
+                    }
+                    else
+                    {
+                        if (string.IsNullOrEmpty(quantityString))
+                        {
+                            result += $"<wcwildcard:{task.Prefix + processedReference}>";
+                        }
+                        else
+                        {
+                            result += $"<wcwildcard{quantityString}:{task.Prefix + processedReference}>";
+                        }
+                    }
+                    
+                    result += $"<wcpopmacro:{filterMacroName}>";
+                    return result;
+                }
+            }
+            
             // Check if reference contains glob patterns (* or **)
             if (processedReference.Contains('*'))
             {
-                return ProcessGlobWildcardRef(quantityString, processedReference, taskId);
+                return ProcessGlobWildcardRef(quantityString, processedReference, taskId, finalFilter);
             }
             
             // Standard non-glob reference
-            if (string.IsNullOrEmpty(quantityString))
+            if (hasFilterSpecified)
             {
-                return $"<wcwildcard:{task.Prefix + processedReference}>";
+                // Generate wildcard with filter using wcpushmacro/wcpopmacro pattern
+                string filterMacroName = $"wcfilter_{processedReference.Replace("/", "_")}";
+                string result = $"<wcpushmacro[{filterMacroName}]:{finalFilter}>";
+                
+                if (string.IsNullOrEmpty(quantityString))
+                {
+                    result += $"<wcwildcard:{task.Prefix + processedReference}:{finalFilter}>";
+                }
+                else
+                {
+                    result += $"<wcwildcard{quantityString}:{task.Prefix + processedReference}:{finalFilter}>";
+                }
+                
+                result += $"<wcpopmacro:{filterMacroName}>";
+                return result;
             }
-            return $"<wcwildcard{quantityString}:{task.Prefix + processedReference}>";
+            else
+            {
+                // No filter
+                if (string.IsNullOrEmpty(quantityString))
+                {
+                    return $"<wcwildcard:{task.Prefix + processedReference}>";
+                }
+                return $"<wcwildcard{quantityString}:{task.Prefix + processedReference}>";
+            }
         }
         
-        private string ProcessGlobWildcardRef(string quantityString, string reference, string taskId)
+        private string ProcessGlobWildcardRef(string quantityString, string reference, string taskId, string filter = "")
         {
             var task = _tasks[taskId];
             
@@ -1498,6 +1635,10 @@ namespace Spoomples.Extensions.WildcardImporter
             {
                 task.AddWarning($"No matches found for glob pattern: {reference}");
                 // Return the original reference in a way that shows it's a failed glob
+                if (!string.IsNullOrEmpty(filter))
+                {
+                    return $"<wcwildcard:{task.Prefix + reference}:{filter}><comment:no glob matches>";
+                }
                 return $"<wcwildcard:{task.Prefix + reference}><comment:no glob matches>";
             }
             
@@ -1506,11 +1647,22 @@ namespace Spoomples.Extensions.WildcardImporter
             {
                 // Only one match, no need for random
                 string path = matchingPaths.First();
-                if (string.IsNullOrEmpty(quantityString))
+                if (!string.IsNullOrEmpty(filter))
                 {
-                    return $"<wcwildcard:{task.Prefix + path}>";
+                    if (string.IsNullOrEmpty(quantityString))
+                    {
+                        return $"<wcwildcard:{task.Prefix + path}:{filter}>";
+                    }
+                    return $"<wcwildcard{quantityString}:{task.Prefix + path}:{filter}>";
                 }
-                return $"<wcwildcard{quantityString}:{task.Prefix + path}>";
+                else
+                {
+                    if (string.IsNullOrEmpty(quantityString))
+                    {
+                        return $"<wcwildcard:{task.Prefix + path}>";
+                    }
+                    return $"<wcwildcard{quantityString}:{task.Prefix + path}>";
+                }
             }
             
             // Build a <wcrandom> tag with all matches
@@ -1521,7 +1673,14 @@ namespace Spoomples.Extensions.WildcardImporter
             for (int i = 0; i < matchingPaths.Count; i++)
             {
                 string path = matchingPaths[i];
-                result.Append($"<wcwildcard:{task.Prefix + path}>");
+                if (!string.IsNullOrEmpty(filter))
+                {
+                    result.Append($"<wcwildcard:{task.Prefix + path}:{filter}>");
+                }
+                else
+                {
+                    result.Append($"<wcwildcard:{task.Prefix + path}>");
+                }
                 if (i < matchingPaths.Count - 1)
                 {
                     result.Append("|");
@@ -2469,6 +2628,26 @@ namespace Spoomples.Extensions.WildcardImporter
         }
 
         #endregion
+        
+        /// <summary>
+        /// Converts 0-based numeric filters to 1-based by incrementing any numeric values found in the filter string.
+        /// For example, "1,special" becomes "2,special" and "0,primary,3" becomes "1,primary,4".
+        /// </summary>
+        private string ConvertNumericFiltersTo1Based(string filter)
+        {
+            if (string.IsNullOrEmpty(filter))
+                return filter;
+                
+            // Use regex to find all numeric values and increment them by 1
+            return System.Text.RegularExpressions.Regex.Replace(filter, @"\b\d+\b", match =>
+            {
+                if (int.TryParse(match.Value, out int number))
+                {
+                    return (number + 1).ToString();
+                }
+                return match.Value;
+            });
+        }
 
     }
 
