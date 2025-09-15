@@ -328,11 +328,11 @@ namespace Spoomples.Extensions.WildcardImporter
             // Replace __wildcards__
             // Matches should include:
             // 1. __word__
-            var wildcardPattern = @"__(?<path>.+?)__";
+            var wildcardPattern = @"__(?<content>.+?)__";
             line = System.Text.RegularExpressions.Regex.Replace(line, wildcardPattern, match => 
             {
-                string reference = match.Groups["path"].Value;
-                return ProcessWildcardRef("", reference, taskId);
+                string content = match.Groups["content"].Value;
+                return ProcessWildcardRef(content, taskId);
             });
             
             line = ProcessVariables(line, _tasks[taskId]);
@@ -1298,12 +1298,6 @@ namespace Spoomples.Extensions.WildcardImporter
                 {
                     customSeparator = remainingPart.Substring(0, separatorIndex);
                     optionsPart = remainingPart.Substring(separatorIndex + 2); // Skip the $$
-                    
-                    // Log warning if custom separator is found
-                    if (!string.IsNullOrEmpty(customSeparator))
-                    {
-                        task.AddWarning($"Custom separator in variant not supported: {fullMatch}");
-                    }
                 }
                 
                 // Handle quantifier specification
@@ -1312,12 +1306,29 @@ namespace Spoomples.Extensions.WildcardImporter
                     // Handle ranges
                     if (numberPart.Contains("-"))
                     {
-                        quantifierSpec = ProcessRangeQuantifier(numberPart, optionsPart);
+                        var rangeSpec = ProcessRangeQuantifier(numberPart, optionsPart);
+                        // ProcessRangeQuantifier returns [min-max,] - we need to insert custom separator
+                        if (!string.IsNullOrEmpty(customSeparator))
+                        {
+                            // Replace the comma with the custom separator: [2-3,] -> [2-3, and ]
+                            quantifierSpec = rangeSpec.Replace(",]", $",{customSeparator}]");
+                        }
+                        else
+                        {
+                            quantifierSpec = rangeSpec;
+                        }
                     }
                     else
                     {
-                        // Simple quantifier: {2$$...}
-                        quantifierSpec = $"[{numberPart},]";
+                        // Simple quantifier: {2$$...} or {2$$ and $$...}
+                        if (!string.IsNullOrEmpty(customSeparator))
+                        {
+                            quantifierSpec = $"[{numberPart},{customSeparator}]";
+                        }
+                        else
+                        {
+                            quantifierSpec = $"[{numberPart},]";
+                        }
                     }
                 }
                 else
@@ -1376,12 +1387,91 @@ namespace Spoomples.Extensions.WildcardImporter
             return $"[{lowerBound}-{upperBound},]";
         }
 
-        private string ProcessWildcardRef(string quantityString, string reference, string taskId)
+        private string ProcessWildcardRef(string content, string taskId)
         {
             var task = _tasks[taskId];
+
+            string quantityString = "";
+            string customSeparator = "";
+            string wildcardPath = content;
+            
+            // Check if wildcard has advanced options (same syntax as variants)
+            // Pattern: __@~ro2-3$$ custom separator $$wildcardpath__
+            if (content.Contains("$$"))
+            {
+                // Try to match the quantifier pattern with optional prefix flags and optional numeric value
+                // Pattern handles: [~@ro][2]$$wildcardpath or [~@ro][2]$$separator$$wildcardpath
+                var match = System.Text.RegularExpressions.Regex.Match(content, @"^(?<prefixFlags>[~@ro]*)(?<numberPart>(?:\d+-\d+|-\d+|\d+)?)\$\$(?<remainingPart>.*)$");
+                
+                if (match.Success)
+                {
+                    string prefixFlags = match.Groups["prefixFlags"].Value; // Optional prefix flags (~, @, r, o) - parsed but ignored
+                    string numberPart = match.Groups["numberPart"].Value;
+                    string remainingPart = match.Groups["remainingPart"].Value;
+                    
+                    // Log debug info about prefix flags if present
+                    if (!string.IsNullOrEmpty(prefixFlags))
+                    {
+                        prefixFlags = prefixFlags.Replace("~", "").Replace("o", "");
+                        if (!string.IsNullOrEmpty(prefixFlags))
+                        {
+                            task.AddWarning($"Wildcard flags '{prefixFlags}' not supported. Ignoring.");
+                        }
+                    }
+                    
+                    // Check if there's a custom separator (pattern: separator$$wildcardpath)
+                    int separatorIndex = FindCustomSeparatorIndex(remainingPart);
+                    if (separatorIndex >= 0)
+                    {
+                        customSeparator = remainingPart.Substring(0, separatorIndex);
+                        wildcardPath = remainingPart.Substring(separatorIndex + 2); // Skip the $$
+                    }
+                    else
+                    {
+                        wildcardPath = remainingPart;
+                    }
+                    
+                    // Handle quantifier specification
+                    if (!string.IsNullOrEmpty(numberPart))
+                    {
+                        // Handle ranges
+                        if (numberPart.Contains("-"))
+                        {
+                            var rangeSpec = ProcessRangeQuantifier(numberPart, wildcardPath);
+                            // ProcessRangeQuantifier returns [min-max,] - we need to insert custom separator
+                            if (!string.IsNullOrEmpty(customSeparator))
+                            {
+                                // Replace the comma with the custom separator: [2-3,] -> [2-3, and ]
+                                quantityString = rangeSpec.Replace(",]", $",{customSeparator}]");
+                            }
+                            else
+                            {
+                                quantityString = rangeSpec;
+                            }
+                        }
+                        else
+                        {
+                            // Simple quantifier: __2$$wildcardpath__ or __2$$ and $$wildcardpath__
+                            if (!string.IsNullOrEmpty(customSeparator))
+                            {
+                                quantityString = $"[{numberPart},{customSeparator}]";
+                            }
+                            else
+                            {
+                                quantityString = $"[{numberPart},]";
+                            }
+                        }
+                    }
+                    else
+                    {
+                        // No quantifier, just prefix flags: __ro$$wildcardpath__ - treat as simple wildcard
+                        quantityString = "";
+                    }
+                }
+            }
             
             // Recursively process the reference to handle nested syntax like ${variable}
-            string processedReference = ProcessWildcardLine(reference, taskId);
+            string processedReference = ProcessWildcardLine(wildcardPath, taskId);
             
             // Check if reference contains glob patterns (* or **)
             if (processedReference.Contains('*'))
@@ -1394,7 +1484,7 @@ namespace Spoomples.Extensions.WildcardImporter
             {
                 return $"<wcwildcard:{task.Prefix + processedReference}>";
             }
-            return $"<wcwildcard[{quantityString}]:{task.Prefix + processedReference}>";
+            return $"<wcwildcard{quantityString}:{task.Prefix + processedReference}>";
         }
         
         private string ProcessGlobWildcardRef(string quantityString, string reference, string taskId)
@@ -1420,11 +1510,11 @@ namespace Spoomples.Extensions.WildcardImporter
                 {
                     return $"<wcwildcard:{task.Prefix + path}>";
                 }
-                return $"<wcwildcard[{quantityString},]:{task.Prefix + path}>";
+                return $"<wcwildcard{quantityString}:{task.Prefix + path}>";
             }
             
             // Build a <wcrandom> tag with all matches
-            var quantitySpec = string.IsNullOrEmpty(quantityString) ? "" : $"[{quantityString},]";
+            var quantitySpec = string.IsNullOrEmpty(quantityString) ? "" : quantityString;
             StringBuilder result = new StringBuilder();
             result.Append($"<wcrandom{quantitySpec}:");
             

@@ -35,6 +35,7 @@ namespace Spoomples.Extensions.WildcardImporter
             TestWeightedVariants();
             TestQuantifierVariants();
             TestQuantifierVariantsWithPrefixFlags();
+            TestVariantCustomSeparators();
             TestRangeVariants();
             TestEmptyVariants();
             TestNestedVariants();
@@ -43,6 +44,7 @@ namespace Spoomples.Extensions.WildcardImporter
             TestBasicWildcards();
             TestWildcardsInVariants();
             TestGlobWildcards();
+            TestAdvancedWildcardOptions();
 
             // Test variables
             TestVariableAssignments();
@@ -218,6 +220,49 @@ namespace Spoomples.Extensions.WildcardImporter
                            "Wildcard quantifier with ~r prefix flags");
         }
 
+        private static void TestVariantCustomSeparators()
+        {
+            // Basic custom separator: {2$$ and $$a|b|c}
+            AssertTransform("Colors: {2$$ and $$red|blue|green}", 
+                           "Colors: <wcrandom[2, and ]:red|blue|green>",
+                           "Basic variant custom separator");
+
+            // Custom separator with range: {2-3$$ or $$chocolate|vanilla|strawberry}
+            AssertTransform("Flavors: {2-3$$ or $$chocolate|vanilla|strawberry}", 
+                           "Flavors: <wcrandom[2-3, or ]:chocolate|vanilla|strawberry>",
+                           "Range variant custom separator");
+
+            // Custom separator with prefix flags: {@~2$$ with $$option1|option2|option3}
+            AssertTransform("Choose: {@~2$$ with $$option1|option2|option3}", 
+                           "Choose: <wcrandom[2, with ]:option1|option2|option3>",
+                           "Prefix flags with custom separator");
+
+            // Complex custom separator: {1-2$$, and also $$item1|item2|item3|item4}
+            AssertTransform("Items: {1-2$$, and also $$item1|item2|item3|item4}", 
+                           "Items: <wcrandom[1-2,, and also ]:item1|item2|item3|item4>",
+                           "Complex custom separator");
+
+            // Custom separator with no lower bound: {-2$$ plus $$alpha|beta|gamma}
+            AssertTransform("Values: {-2$$ plus $$alpha|beta|gamma}", 
+                           "Values: <wcrandom[1-2, plus ]:alpha|beta|gamma>",
+                           "No lower bound with custom separator");
+
+            // Empty custom separator (just $$): {2$$$$red|blue|green}
+            AssertTransform("Empty sep: {2$$$$red|blue|green}", 
+                           "Empty sep: <wcrandom[2,]:red|blue|green>",
+                           "Empty custom separator");
+
+            // Custom separator with spaces: {3$$   between   $$cat|dog|bird}
+            AssertTransform("Pets: {3$$   between   $$cat|dog|bird}", 
+                           "Pets: <wcrandom[3,   between   ]:cat|dog|bird>",
+                           "Custom separator with spaces");
+
+            // Custom separator with special characters: {2$$--$$first|second|third}
+            AssertTransform("Sequence: {2$$--$$first|second|third}", 
+                           "Sequence: <wcrandom[2,--]:first|second|third>",
+                           "Custom separator with special characters");
+        }
+
         private static void TestRangeVariants()
         {
             // Range: {2-3$$a|b|c|d}
@@ -356,6 +401,77 @@ namespace Spoomples.Extensions.WildcardImporter
                            "<wcwildcard:unique-file> test",
                            "Single glob match",
                            CreateMockFiles("unique-file"));
+        }
+
+        private static void TestAdvancedWildcardOptions()
+        {
+            // Basic quantifier: __2$$colors__
+            AssertTransform("I like __2$$colors__", 
+                           "I like <wcwildcard[2,]:colors>",
+                           "Basic wildcard quantifier");
+
+            // Range quantifier: __2-3$$animals__
+            AssertTransform("My pets are __2-3$$animals__", 
+                           "My pets are <wcwildcard[2-3,]:animals>",
+                           "Range wildcard quantifier");
+
+            // No lower bound: __-2$$flavors__
+            AssertTransform("Pick __-2$$flavors__", 
+                           "Pick <wcwildcard[1-2,]:flavors>",
+                           "No lower bound wildcard quantifier");
+
+
+            // Prefix flags only (ignored): __@~ro$$styles__
+            AssertTransform("Style: __@~ro$$styles__", 
+                           "Style: <wcwildcard:styles>",
+                           "Prefix flags only wildcard");
+
+            // Prefix flags with quantifier: __@~ro2$$moods__
+            AssertTransform("Mood: __@~ro2$$moods__", 
+                           "Mood: <wcwildcard[2,]:moods>",
+                           "Prefix flags with quantifier wildcard");
+
+            // Custom separator: __2$$ and $$colors__
+            AssertTransform("Colors: __2$$ and $$colors__", 
+                           "Colors: <wcwildcard[2, and ]:colors>",
+                           "Custom separator wildcard");
+
+            // Complex example: __@~ro2-3$$ with $$themes__
+            AssertTransform("Themes: __@~ro2-3$$ with $$themes__", 
+                           "Themes: <wcwildcard[2-3, with ]:themes>",
+                           "Complex advanced wildcard options");
+
+            // Mixed with glob patterns: __2$$colors*__
+            AssertTransform("__2$$colors*__ are nice", 
+                           "<wcrandom[2,]:<wcwildcard:colors-cold>|<wcwildcard:colors-warm>> are nice",
+                           "Advanced options with glob wildcard",
+                           CreateMockFiles("colors-cold", "colors-warm"));
+
+            // Custom separator with glob patterns: __2$$ and $$colors*__
+            AssertTransform("__2$$ and $$colors*__ are nice", 
+                           "<wcrandom[2, and ]:<wcwildcard:colors-cold>|<wcwildcard:colors-warm>> are nice",
+                           "Custom separator with glob wildcard",
+                           CreateMockFiles("colors-cold", "colors-warm"));
+
+            // Nested in variants: {__2$$colors__|blue}
+            AssertTransform("I like {__2$$colors__|blue}", 
+                           "I like <wcrandom:<wcwildcard[2,]:colors>|blue>",
+                           "Advanced wildcard options in variant");
+
+            // Multiple advanced wildcards
+            AssertTransform("__2$$colors__ and __1-3$$animals__", 
+                           "<wcwildcard[2,]:colors> and <wcwildcard[1-3,]:animals>",
+                           "Multiple advanced wildcards");
+
+            // Edge case: empty quantifier with $$
+            AssertTransform("__$$colors__", 
+                           "<wcwildcard:colors>",
+                           "Empty quantifier with $$ wildcard");
+
+            // Edge case: just prefix flags
+            AssertTransform("__@$$colors__", 
+                           "<wcwildcard:colors>",
+                           "Just prefix flags wildcard");
         }
 
         #endregion
