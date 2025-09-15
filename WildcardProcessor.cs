@@ -328,14 +328,11 @@ namespace Spoomples.Extensions.WildcardImporter
             // Replace __wildcards__
             // Matches should include:
             // 1. __word__
-            // 2. 32$$__word__  (this means pick 32 from the wildcard defined by word)
-            // 3. 10-32$$__word__  (this means pick 10-32 from the wildcard defined by word)
-            var wildcardPattern = @"((\d+(?:-\d+)?)?\\$\\$)?__(.+?)__";
+            var wildcardPattern = @"__(?<path>.+?)__";
             line = System.Text.RegularExpressions.Regex.Replace(line, wildcardPattern, match => 
             {
-                string quantitySpec = match.Groups[2].Success ? match.Groups[2].Value : "";
-                string reference = match.Groups[3].Value;
-                return ProcessWildcardRef(quantitySpec, reference, taskId);
+                string reference = match.Groups["path"].Value;
+                return ProcessWildcardRef("", reference, taskId);
             });
             
             line = ProcessVariables(line, _tasks[taskId]);
