@@ -34,6 +34,7 @@ namespace Spoomples.Extensions.WildcardImporter
             TestBasicVariants();
             TestWeightedVariants();
             TestQuantifierVariants();
+            TestQuantifierVariantsWithPrefixFlags();
             TestRangeVariants();
             TestEmptyVariants();
             TestNestedVariants();
@@ -116,7 +117,7 @@ namespace Spoomples.Extensions.WildcardImporter
 
             // Single option
             AssertTransform("{summer} is coming", 
-                           "summer is coming",
+                           "<wcrandom:summer> is coming",
                            "Single option variant");
             
             AssertTransform("{2000|2010|2020} is coming",
@@ -159,6 +160,62 @@ namespace Spoomples.Extensions.WildcardImporter
             AssertTransform("{1$$red|blue|green}", 
                            "<wcrandom[1,]:red|blue|green>",
                            "Explicit single quantifier");
+        }
+
+        private static void TestQuantifierVariantsWithPrefixFlags()
+        {
+            // Test with ~ prefix flag
+            AssertTransform("{~3$$a|b|c}", 
+                           "<wcrandom[3,]:a|b|c>",
+                           "Quantifier variant with ~ prefix flag");
+
+            // Test with @ prefix flag
+            AssertTransform("{@1-2$$red|blue|green}", 
+                           "<wcrandom[1-2,]:red|blue|green>",
+                           "Range variant with @ prefix flag");
+
+            // Test with r prefix flag
+            AssertTransform("{r2$$chocolate|vanilla}", 
+                           "<wcrandom[2,]:chocolate|vanilla>",
+                           "Quantifier variant with r prefix flag");
+
+            // Test with o prefix flag
+            AssertTransform("{o1-3$$colors|shades|tones}", 
+                           "<wcrandom[1-3,]:colors|shades|tones>",
+                           "Range variant with o prefix flag");
+
+            // Test with multiple prefix flags combined
+            AssertTransform("{~r3$$a|b|c}", 
+                           "<wcrandom[3,]:a|b|c>",
+                           "Quantifier variant with ~r prefix flags");
+
+            AssertTransform("{@o1-2$$a|b|c}", 
+                           "<wcrandom[1-2,]:a|b|c>",
+                           "Range variant with @o prefix flags");
+
+            AssertTransform("{ro$$a|b|c}", 
+                           "<wcrandom:a|b|c>",
+                           "Simple variant with ro prefix flags (no quantifier)");
+
+            // Test with all prefix flags
+            AssertTransform("{~@ro2$$red|green|blue}", 
+                           "<wcrandom[2,]:red|green|blue>",
+                           "Quantifier variant with all prefix flags ~@ro");
+
+            // Test prefix flags with no upper bound range
+            AssertTransform("{~2-$$red|blue|green|yellow}", 
+                           "<wcrandom[2-4,]:red|blue|green|yellow>",
+                           "No upper bound range with ~ prefix flag");
+
+            // Test prefix flags with no lower bound range
+            AssertTransform("{@-3$$red|blue|green}", 
+                           "<wcrandom[1-3,]:red|blue|green>",
+                           "No lower bound range with @ prefix flag");
+
+            // Test prefix flags with wildcards
+            AssertTransform("{~r2$$__flavours__}", 
+                           "<wcwildcard[2,]:flavours>",
+                           "Wildcard quantifier with ~r prefix flags");
         }
 
         private static void TestRangeVariants()
@@ -652,7 +709,7 @@ namespace Spoomples.Extensions.WildcardImporter
 
             // Empty variant
             AssertTransform("{} car", 
-                           "<comment:empty> car",
+                           "<wcrandom:<comment:empty>> car",
                            "Empty variant");
 
             // Malformed wildcard
@@ -679,8 +736,8 @@ namespace Spoomples.Extensions.WildcardImporter
                            "Quantifier with nested structures");
 
             AssertTransform("${clothed_state={__scenes/${scene}/clothed_state__}}",
-                "<setmacro[clothed_state,false]:<wcwildcard:scenes/<macro:scene>/clothed_state>>",
-                "Wildcard with variable inside setvar");
+                "<setmacro[clothed_state,false]:<wcrandom:<wcwildcard:scenes/<macro:scene>/clothed_state>>>",
+                "Wildcard inside variant with variable inside setvar");
         }
 
         private static void TestSpecialCharacters()
@@ -1069,9 +1126,9 @@ namespace Spoomples.Extensions.WildcardImporter
                            "Range variant with variables");
             
             // Test the original failing case that started this fix
-            AssertTransform("${clothed_state={__scenes/${scene}/clothed_state__}}", 
+            AssertTransform("${clothed_state=__scenes/${scene}/clothed_state__}", 
                            "<setmacro[clothed_state,false]:<wcwildcard:scenes/<macro:scene>/clothed_state>>",
-                           "Original failing case - wildcard with variable inside setvar");
+                           "wildcard with variable inside setvar");
             
             // Test variable assignments with complex nested content
             AssertTransform("${style={modern|__historical/${period}__}} building", 

@@ -1266,17 +1266,26 @@ namespace Spoomples.Extensions.WildcardImporter
         /// <returns>The processed content.</returns>
         private string ProcessQuantifierVariant(string content, string fullMatch, ProcessingTask task)
         {
-            // Try to match the quantifier pattern
-            // Pattern handles: 2$$options or 2$$separator$$options
-            var match = System.Text.RegularExpressions.Regex.Match(content, @"^((?:\d+-\d+|-\d+|\d+-|\d+))\$\$(.*)$");
+            // Try to match the quantifier pattern with optional prefix flags and optional numeric value
+            // Pattern handles: [~@ro][2]$$options or [~@ro][2]$$separator$$options
+            // Optional prefix flags: ~ @ r o (can appear in any combination)
+            // Optional numeric quantifier: can be empty for prefix-only variants like {ro$$a|b|c}
+            var match = System.Text.RegularExpressions.Regex.Match(content, @"^(?<prefixFlags>[~@ro]*)(?<numberPart>(?:\d+-\d+|-\d+|\d+-|\d+)?)\$\$(?<remainingPart>.*)$");
             
             Logs.Debug($"WildcardProcessor: Regex match success={match.Success}");
             
             if (match.Success)
             {
                 string quantifierSpec = "";
-                string numberPart = match.Groups[1].Value;
-                string remainingPart = match.Groups[2].Value;
+                string prefixFlags = match.Groups["prefixFlags"].Value; // Optional prefix flags (~, @, r, o) - parsed but ignored
+                string numberPart = match.Groups["numberPart"].Value;
+                string remainingPart = match.Groups["remainingPart"].Value;
+                
+                // Log debug info about prefix flags if present
+                if (!string.IsNullOrEmpty(prefixFlags))
+                {
+                    Logs.Debug($"WildcardProcessor: Found prefix flags '{prefixFlags}' in variant {fullMatch} - ignoring as requested");
+                }
                 
                 // Check if there's a custom separator (pattern: separator$$options)
                 // But ignore $$ inside nested structures like <wildcard:...> or {...}
@@ -1296,15 +1305,24 @@ namespace Spoomples.Extensions.WildcardImporter
                     }
                 }
                 
-                // Handle ranges
-                if (numberPart.Contains("-"))
+                // Handle quantifier specification
+                if (!string.IsNullOrEmpty(numberPart))
                 {
-                    quantifierSpec = ProcessRangeQuantifier(numberPart, optionsPart);
+                    // Handle ranges
+                    if (numberPart.Contains("-"))
+                    {
+                        quantifierSpec = ProcessRangeQuantifier(numberPart, optionsPart);
+                    }
+                    else
+                    {
+                        // Simple quantifier: {2$$...}
+                        quantifierSpec = $"[{numberPart},]";
+                    }
                 }
                 else
                 {
-                    // Simple quantifier: {2$$...}
-                    quantifierSpec = $"[{numberPart},]";
+                    // No quantifier, just prefix flags: {ro$$...} - treat as simple variant
+                    quantifierSpec = "";
                 }
                 
                 // Special case: Single wildcard with quantifier should become <wcwildcard[quantifier]:name>
