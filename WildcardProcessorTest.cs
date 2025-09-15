@@ -45,6 +45,7 @@ namespace Spoomples.Extensions.WildcardImporter
             TestWildcardsInVariants();
             TestGlobWildcards();
             TestAdvancedWildcardOptions();
+            TestVariableOverrides();
             
             // Test label filtering
             TestLabelFiltering();
@@ -478,6 +479,85 @@ namespace Spoomples.Extensions.WildcardImporter
             AssertTransform("__@$$colors__", 
                            "<wcwildcard:colors>",
                            "Just prefix flags wildcard");
+        }
+
+        private static void TestVariableOverrides()
+        {
+            // Basic single variable override: __wildcard(var=value)__
+            AssertTransform("__colors(theme=warm)__ are nice", 
+                           "<wcpushmacro[theme]:warm><wcwildcard:colors><wcpopmacro:theme> are nice",
+                           "Basic single variable override");
+
+            // Single variable override with commas in value: __wildcard(var=value with, commas)__
+            AssertTransform("__foods(ingredients=salt, pepper, herbs)__ taste good", 
+                           "<wcpushmacro[ingredients]:salt, pepper, herbs><wcwildcard:foods><wcpopmacro:ingredients> taste good",
+                           "Single variable override with commas in value");
+
+            // Variable override with nested parentheses in value: __wildcard(var=value (with nested) text)__
+            AssertTransform("__styles(mood=happy (very excited) feeling)__ today", 
+                           "<wcpushmacro[mood]:happy (very excited) feeling><wcwildcard:styles><wcpopmacro:mood> today",
+                           "Variable override with nested parentheses");
+
+            // Variable override with quantifier: __2$$wildcard(var=value)__
+            AssertTransform("__2$$colors(brightness=bright)__ shine", 
+                           "<wcpushmacro[brightness]:bright><wcwildcard[2,]:colors><wcpopmacro:brightness> shine",
+                           "Variable override with quantifier");
+
+            // Variable override with range quantifier: __2-3$$wildcard(var=value)__
+            AssertTransform("__2-3$$animals(type=mammal)__ are cute", 
+                           "<wcpushmacro[type]:mammal><wcwildcard[2-3,]:animals><wcpopmacro:type> are cute",
+                           "Variable override with range quantifier");
+
+            // Variable override with custom separator: __2$$ and $$wildcard(var=value)__
+            AssertTransform("__2$$ and $$colors(tone=pastel)__ blend well", 
+                           "<wcpushmacro[tone]:pastel><wcwildcard[2, and ]:colors><wcpopmacro:tone> blend well",
+                           "Variable override with custom separator");
+
+            // Variable override with label filter: __wildcard'filter'(var=value)__
+            AssertTransform("__colors'primary'(intensity=high)__ are bold", 
+                           "<wcpushmacro[intensity]:high><wcpushmacro[wcfilter_colors]:primary><wcwildcard:colors:primary><wcpopmacro:wcfilter_colors><wcpopmacro:intensity> are bold",
+                           "Variable override with label filter");
+
+            // Variable override with glob pattern: __wildcard*(var=value)__
+            AssertTransform("__colors*(mood=cheerful)__ are uplifting", 
+                           "<wcpushmacro[mood]:cheerful><wcrandom:<wcwildcard:colors-cold>|<wcwildcard:colors-warm>><wcpopmacro:mood> are uplifting",
+                           "Variable override with glob pattern",
+                           CreateMockFiles("colors-cold", "colors-warm"));
+
+            // Variable override with complex value containing parentheses and commas
+            AssertTransform("__recipes(description=chicken (grilled) with herbs, served hot)__ for dinner", 
+                           "<wcpushmacro[description]:chicken (grilled) with herbs, served hot><wcwildcard:recipes><wcpopmacro:description> for dinner",
+                           "Variable override with complex value");
+
+            // Variable override in variants: {__wildcard(var=value)__|other}
+            AssertTransform("I like {__colors(mood=bright)__|dark themes}", 
+                           "I like <wcrandom:<wcpushmacro[mood]:bright><wcwildcard:colors><wcpopmacro:mood>|dark themes>",
+                           "Variable override in variant");
+
+            // Multiple wildcards with different variable overrides
+            AssertTransform("__colors(tone=warm)__ and __animals(size=small)__ together", 
+                           "<wcpushmacro[tone]:warm><wcwildcard:colors><wcpopmacro:tone> and <wcpushmacro[size]:small><wcwildcard:animals><wcpopmacro:size> together",
+                           "Multiple wildcards with different variable overrides");
+
+            // Edge case: empty variable name (should be ignored)
+            AssertTransform("__colors(=value)__ test", 
+                           "<wcwildcard:colors> test",
+                           "Empty variable name (ignored)");
+
+            // Edge case: empty variable value (should be ignored)
+            AssertTransform("__colors(var=)__ test", 
+                           "<wcwildcard:colors> test",
+                           "Empty variable value (ignored)");
+
+            // Edge case: malformed variable assignment (should be ignored)
+            AssertTransform("__colors(noequals)__ test", 
+                           "<wcwildcard:colors> test",
+                           "Malformed variable assignment (ignored)");
+
+            // Edge case: variable override with no wildcard content
+            AssertTransform("__(var=value)__ test", 
+                           "<wcpushmacro[var]:value><wcwildcard:><wcpopmacro:var> test",
+                           "Variable override with empty wildcard");
         }
 
         private static void TestLabelFiltering()

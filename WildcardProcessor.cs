@@ -1454,10 +1454,48 @@ namespace Spoomples.Extensions.WildcardImporter
             string wildcardPath = content;
             string labelFilter = "";
             bool hasFilterSpecified = false;
+            List<(string varName, string varValue)> variableOverrides = new List<(string, string)>();
             
-            // Parse label filter first (before processing quantifiers)
-            // Look for 'filter' or "filter" at the end of the content
-            var filterMatch = System.Text.RegularExpressions.Regex.Match(content, @"^(.*?)(['""])([^'""]*?)\2$");
+            // Parse variable overrides first (before processing anything else)
+            // Look for (var=value) or (var1=value1,var2=value2) at the end of the content
+            // Use proper parentheses matching to handle nested parentheses in values
+            if (content.EndsWith(")"))
+            {
+                // Find the matching opening parenthesis by counting backwards
+                int parenCount = 0;
+                int openParenIndex = -1;
+                
+                for (int i = content.Length - 1; i >= 0; i--)
+                {
+                    if (content[i] == ')')
+                    {
+                        parenCount++;
+                    }
+                    else if (content[i] == '(')
+                    {
+                        parenCount--;
+                        if (parenCount == 0)
+                        {
+                            openParenIndex = i;
+                            break;
+                        }
+                    }
+                }
+                
+                // Check if we found a complete parentheses pair at the end
+                if (openParenIndex != -1 && parenCount == 0)
+                {
+                    wildcardPath = content.Substring(0, openParenIndex);
+                    string variableString = content.Substring(openParenIndex + 1, content.Length - openParenIndex - 2);
+                    
+                    // Parse variable assignments with proper handling of nested structures
+                    variableOverrides = ParseVariableAssignments(variableString);
+                }
+            }
+            
+            // Parse label filter second (after processing variable overrides)
+            // Look for 'filter' or "filter" at the end of the remaining content
+            var filterMatch = System.Text.RegularExpressions.Regex.Match(wildcardPath, @"^(.*?)(['""])([^'""]*?)\2$");
             if (filterMatch.Success)
             {
                 wildcardPath = filterMatch.Groups[1].Value;
@@ -1569,7 +1607,7 @@ namespace Spoomples.Extensions.WildcardImporter
                     // Generate the wildcard without filter
                     if (processedReference.Contains('*'))
                     {
-                        result += ProcessGlobWildcardRef(quantityString, processedReference, taskId, "");
+                        result += ProcessGlobWildcardRef(quantityString, processedReference, taskId, "", variableOverrides);
                     }
                     else
                     {
@@ -1588,43 +1626,106 @@ namespace Spoomples.Extensions.WildcardImporter
                 }
             }
             
+            // Generate the base wildcard result
+            string baseResult;
+            
             // Check if reference contains glob patterns (* or **)
             if (processedReference.Contains('*'))
             {
-                return ProcessGlobWildcardRef(quantityString, processedReference, taskId, finalFilter);
-            }
-            
-            // Standard non-glob reference
-            if (hasFilterSpecified)
-            {
-                // Generate wildcard with filter using wcpushmacro/wcpopmacro pattern
-                string filterMacroName = $"wcfilter_{processedReference.Replace("/", "_")}";
-                string result = $"<wcpushmacro[{filterMacroName}]:{finalFilter}>";
-                
-                if (string.IsNullOrEmpty(quantityString))
-                {
-                    result += $"<wcwildcard:{task.Prefix + processedReference}:{finalFilter}>";
-                }
-                else
-                {
-                    result += $"<wcwildcard{quantityString}:{task.Prefix + processedReference}:{finalFilter}>";
-                }
-                
-                result += $"<wcpopmacro:{filterMacroName}>";
-                return result;
+                baseResult = ProcessGlobWildcardRef(quantityString, processedReference, taskId, finalFilter, variableOverrides);
             }
             else
             {
-                // No filter
-                if (string.IsNullOrEmpty(quantityString))
+                // Standard non-glob reference
+                if (hasFilterSpecified)
                 {
-                    return $"<wcwildcard:{task.Prefix + processedReference}>";
+                    // Generate wildcard with filter using wcpushmacro/wcpopmacro pattern
+                    string filterMacroName = $"wcfilter_{processedReference.Replace("/", "_")}";
+                    baseResult = $"<wcpushmacro[{filterMacroName}]:{finalFilter}>";
+                    
+                    if (string.IsNullOrEmpty(quantityString))
+                    {
+                        baseResult += $"<wcwildcard:{task.Prefix + processedReference}:{finalFilter}>";
+                    }
+                    else
+                    {
+                        baseResult += $"<wcwildcard{quantityString}:{task.Prefix + processedReference}:{finalFilter}>";
+                    }
+                    
+                    baseResult += $"<wcpopmacro:{filterMacroName}>";
                 }
-                return $"<wcwildcard{quantityString}:{task.Prefix + processedReference}>";
+                else
+                {
+                    // No filter
+                    if (string.IsNullOrEmpty(quantityString))
+                    {
+                        baseResult = $"<wcwildcard:{task.Prefix + processedReference}>";
+                    }
+                    else
+                    {
+                        baseResult = $"<wcwildcard{quantityString}:{task.Prefix + processedReference}>";
+                    }
+                }
             }
+            
+            // Wrap with variable overrides if any were specified
+            if (variableOverrides.Count > 0)
+            {
+                string result = "";
+                
+                // Add push macros for each variable (in order)
+                foreach (var (varName, varValue) in variableOverrides)
+                {
+                    result += $"<wcpushmacro[{varName}]:{varValue}>";
+                }
+                
+                // Add the base wildcard result
+                result += baseResult;
+                
+                // Add pop macros for each variable (in reverse order)
+                for (int i = variableOverrides.Count - 1; i >= 0; i--)
+                {
+                    result += $"<wcpopmacro:{variableOverrides[i].varName}>";
+                }
+                
+                return result;
+            }
+            
+            return baseResult;
         }
         
-        private string ProcessGlobWildcardRef(string quantityString, string reference, string taskId, string filter = "")
+        /// <summary>
+        /// Parses a single variable assignment from a string like "var=value with (nested) parens and, commas"
+        /// Properly handles nested parentheses and commas within the variable value.
+        /// </summary>
+        /// <param name="variableString">The string containing a single variable assignment</param>
+        /// <returns>List with single variable name-value pair, or empty list if parsing fails</returns>
+        private List<(string varName, string varValue)> ParseVariableAssignments(string variableString)
+        {
+            var result = new List<(string, string)>();
+            
+            if (string.IsNullOrWhiteSpace(variableString))
+                return result;
+            
+            // Find the first '=' character
+            int equalPos = variableString.IndexOf('=');
+            if (equalPos == -1 || equalPos == 0 || equalPos == variableString.Length - 1)
+                return result; // No '=' found, or '=' at start/end
+            
+            // Extract variable name and value
+            string varName = variableString.Substring(0, equalPos).Trim();
+            string varValue = variableString.Substring(equalPos + 1).Trim();
+            
+            // Validate that both name and value are non-empty
+            if (!string.IsNullOrEmpty(varName) && !string.IsNullOrEmpty(varValue))
+            {
+                result.Add((varName, varValue));
+            }
+            
+            return result;
+        }
+        
+        private string ProcessGlobWildcardRef(string quantityString, string reference, string taskId, string filter = "", List<(string varName, string varValue)> variableOverrides = null)
         {
             var task = _tasks[taskId];
             
