@@ -287,6 +287,10 @@ namespace Spoomples.Extensions.WildcardImporter
             AssertTransform("__clothing/shirts__ are nice", 
                            "<wcwildcard:clothing/shirts> are nice",
                            "Wildcard with path");
+
+            AssertTransform("2$$__color__",
+                "2$$<wcwildcard:color>",
+                "Wildcards outside of variant do not process $$ prefix outside of __");
         }
 
         private static void TestWildcardsInVariants()
