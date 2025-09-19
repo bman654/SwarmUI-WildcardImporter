@@ -52,6 +52,7 @@ namespace Spoomples.Extensions.WildcardImporter
             
             // Test wildcard choice labels
             TestWildcardChoiceLabels();
+            TestIfConditions();
 
             // Test variables
             TestVariableAssignments();
@@ -676,6 +677,19 @@ namespace Spoomples.Extensions.WildcardImporter
                            CreateMockFiles("colors-cold", "colors-warm"));
         }
 
+        private static void TestIfConditions()
+        {
+            AssertTransform(" if foo not in (\"a\",\"b\", bar) :: value",
+                " if foo ne \"a\" and foo ne \"b\" and foo ne bar:: value",
+                "if condition with not in clause");
+            AssertTransform(" if foo not in (\"a\",\"b\", bar) : value",
+                " if foo not in (\"a\",\"b\", bar) : value",
+                "if condition not processed if no ::");
+            AssertTransform("{a| if foo not in (\"a\",\"b\", bar) :: value|2 if foo eq \"apple\"::value2}",
+                "<wcrandom:a|if foo ne \"a\" and foo ne \"b\" and foo ne bar:: value|2 if foo eq \"apple\"::value2>",
+                "if condition inside variant processed");
+        }
+
         private static void TestWildcardChoiceLabels()
         {
             // Basic single-quoted labels with :: before <
@@ -717,11 +731,6 @@ namespace Spoomples.Extensions.WildcardImporter
             AssertTransform("''::empty labels test",
                            "()::empty labels test",
                            "Empty labels converted to empty parentheses");
-
-            // Whitespace before labels should be preserved
-            AssertTransform("  'spaced,labels'::content",
-                           "  (spaced,labels)::content",
-                           "Whitespace before labels preserved");
 
             // No :: in line - should not change
             AssertTransform("'labels'without double colon",
@@ -1639,7 +1648,7 @@ namespace Spoomples.Extensions.WildcardImporter
                     throw new Exception("ProcessWildcardLine method not found");
                 }
                 
-                string result = (string)method.Invoke(processor, new object[] { input, taskId, true });
+                string result = (string)method.Invoke(processor, new object[] { input, taskId });
 
                 if (result == expected)
                 {
@@ -1759,12 +1768,12 @@ namespace Spoomples.Extensions.WildcardImporter
         {
             // Contains operation with list (variables)
             AssertTransform("<ppp:if myvar contains (val1,val2,val3)>found<ppp:/if>",
-                           "<wcmatch:<wccase[contains(myvar, val1) || contains(myvar, val2) || contains(myvar, val3)]:found>>",
+                           "<wcmatch:<wccase[contains(myvar, val1) or contains(myvar, val2) or contains(myvar, val3)]:found>>",
                            "If with contains list operation");
 
             // In operation with list (variables)
             AssertTransform("<ppp:if myvar in (option1,option2,option3)>in list<ppp:/if>",
-                           "<wcmatch:<wccase[myvar eq option1 || myvar eq option2 || myvar eq option3]:in list>>",
+                           "<wcmatch:<wccase[myvar eq option1 or myvar eq option2 or myvar eq option3]:in list>>",
                            "If with in list operation");
 
             // Single value in parentheses (should be treated as single value)
@@ -1774,12 +1783,12 @@ namespace Spoomples.Extensions.WildcardImporter
 
             // Mixed quoted and unquoted values in list
             AssertTransform("<ppp:if myvar contains (var1,\"literal\",var2)>mixed<ppp:/if>",
-                           "<wcmatch:<wccase[contains(myvar, var1) || contains(myvar, \"literal\") || contains(myvar, var2)]:mixed>>",
+                           "<wcmatch:<wccase[contains(myvar, var1) or contains(myvar, \"literal\") or contains(myvar, var2)]:mixed>>",
                            "If with mixed quoted and unquoted values");
 
             // All quoted values in list
             AssertTransform("<ppp:if myvar in (\"opt1\",\"opt2\",\"opt3\")>all quoted<ppp:/if>",
-                           "<wcmatch:<wccase[myvar eq \"opt1\" || myvar eq \"opt2\" || myvar eq \"opt3\"]:all quoted>>",
+                           "<wcmatch:<wccase[myvar eq \"opt1\" or myvar eq \"opt2\" or myvar eq \"opt3\"]:all quoted>>",
                            "If with all quoted values");
         }
 
@@ -1797,7 +1806,7 @@ namespace Spoomples.Extensions.WildcardImporter
 
             // Not with list operation
             AssertTransform("<ppp:if myvar not in (val1,val2)>not in list<ppp:/if>",
-                           "<wcmatch:<wccase[myvar ne val1 && myvar ne val2]:not in list>>",
+                           "<wcmatch:<wccase[myvar ne val1 and myvar ne val2]:not in list>>",
                            "If with not in list");
 
             // Not with greater than

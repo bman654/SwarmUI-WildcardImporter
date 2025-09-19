@@ -6,6 +6,8 @@ using SwarmUI.Utils;
 
 namespace Spoomples.Extensions.WildcardImporter
 {
+    using FreneticUtilities.FreneticExtensions;
+
     public class WildcardProcessor
     {
         private readonly YamlParser _yamlParser;
@@ -300,7 +302,7 @@ namespace Spoomples.Extensions.WildcardImporter
                 List<string> processedLines = new List<string>();
                 foreach (var line in lines)
                 {
-                    processedLines.Add(ProcessWildcardLine(line, taskId, true));
+                    processedLines.Add(ProcessWildcardLine(line, taskId));
                 }
                 
                 // Regular text file
@@ -320,7 +322,7 @@ namespace Spoomples.Extensions.WildcardImporter
             Logs.Info($"Completed processing all files with wildcard references");
         }
 
-        private string ProcessWildcardLine(string line, string taskId, bool root = false)
+        private string ProcessWildcardLine(string line, string taskId)
         {
             Logs.Verbose($"WildcardProcessor: ProcessWildcardLine called with line='{line}'");
             
@@ -381,12 +383,9 @@ namespace Spoomples.Extensions.WildcardImporter
             // Process all variants with proper brace matching, including nested variants
             line = ProcessVariants(line, _tasks[taskId]);
 
-            if (root)
-            {
-                // Post-process labels in wildcard choices
-                // Check if the line has "::" before the first "<" and starts with quoted labels
-                line = ProcessWildcardChoiceLabels(line);
-            }
+            // Post-process labels in wildcard choices
+            // Check if the line has "::" before the first "<" and starts with quoted labels
+            line = ProcessWildcardChoiceLabels(line, _tasks[taskId]);
 
             return line;
         }
@@ -434,7 +433,7 @@ namespace Spoomples.Extensions.WildcardImporter
         /// </summary>
         /// <param name="line">The processed line to check for wildcard choice labels.</param>
         /// <returns>The line with quoted labels converted to parentheses.</returns>
-        private string ProcessWildcardChoiceLabels(string line)
+        private string ProcessWildcardChoiceLabels(string line, ProcessingTask task)
         {
             // Check if the line has "::" before the first "<"
             int firstAngleBracket = line.IndexOf('<');
@@ -447,34 +446,39 @@ namespace Spoomples.Extensions.WildcardImporter
             }
             
             // Check if the line starts with quoted labels
-            string trimmedLine = line.TrimStart();
+            (string opts, string value) = line.BeforeAndAfter("::");
+            opts = opts.Trim();
             
-            // Check for single quotes: 'labels'
-            if (trimmedLine.StartsWith("'") && trimmedLine.IndexOf("'", 1) > 0)
+            // adjust any potential "if" expressions
+            var ifMatch = PromptDirectives.IfConditionRE().Match(opts);
+            if (ifMatch.Success)
             {
-                int endQuote = trimmedLine.IndexOf("'", 1);
-                string labels = trimmedLine.Substring(1, endQuote - 1);
-                string beforeLabels = line.Substring(0, line.Length - trimmedLine.Length);
-                string afterLabels = trimmedLine.Substring(endQuote + 1);
+                var ifExpr = ifMatch.Groups["expr"].Value;
+                opts = $"{opts.Substring(0, ifMatch.Index).Trim()} if {ProcessCondition(ifExpr, task)}";  
+            }
+
+            // Check for single quotes: 'labels'
+            if (opts.StartsWith("'") && opts.IndexOf("'", 1) > 0)
+            {
+                int endQuote = opts.IndexOf("'", 1);
+                string labels = opts.Substring(1, endQuote - 1);
+                string afterLabels = opts.Substring(endQuote + 1);
                 
                 Logs.Debug($"WildcardProcessor: Converting single-quoted labels '{labels}' to ({labels})");
-                return beforeLabels + "(" + labels + ")" + afterLabels;
+                opts = $"({labels}){afterLabels}";
             }
-            
-            // Check for double quotes: "labels"
-            if (trimmedLine.StartsWith("\"") && trimmedLine.IndexOf("\"", 1) > 0)
+            else if (opts.StartsWith("\"") && opts.IndexOf("\"", 1) > 0)
             {
-                int endQuote = trimmedLine.IndexOf("\"", 1);
-                string labels = trimmedLine.Substring(1, endQuote - 1);
-                string beforeLabels = line.Substring(0, line.Length - trimmedLine.Length);
-                string afterLabels = trimmedLine.Substring(endQuote + 1);
+                int endQuote = opts.IndexOf("\"", 1);
+                string labels = opts.Substring(1, endQuote - 1);
+                string afterLabels = opts.Substring(endQuote + 1);
                 
                 Logs.Debug($"WildcardProcessor: Converting double-quoted labels \"{labels}\" to ({labels})");
-                return beforeLabels + "(" + labels + ")" + afterLabels;
+                opts = $"({labels}){afterLabels}";
             }
             
             // No quoted labels found at the start
-            return line;
+            return $"{opts}::{value}";
         }
 
         private string ProcessVariables(string input, ProcessingTask task)
@@ -2475,18 +2479,18 @@ namespace Spoomples.Extensions.WildcardImporter
                 if (operation.ToLowerInvariant() == "contains")
                 {
                     expressions = expressions.Select(expr => $"not {expr}").ToList();
-                    joinOperator = " && ";
+                    joinOperator = " and ";
                 }
                 else // in
                 {
                     expressions = expressions.Select(expr => expr.Replace(" eq ", " ne ")).ToList();
-                    joinOperator = " && ";
+                    joinOperator = " and ";
                 }
             }
             else
             {
                 // For normal operations, we use OR
-                joinOperator = " || ";
+                joinOperator = " or ";
             }
             
             return string.Join(joinOperator, expressions);
