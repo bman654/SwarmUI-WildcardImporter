@@ -285,7 +285,7 @@ namespace Spoomples.Extensions.WildcardImporter
             textSegment = System.Text.RegularExpressions.Regex.Replace(textSegment, @"(\s*\.\s*)+", ". ");
 
             // Remove leading and trailing ",", ".", and " "
-            textSegment = textSegment.Trim(' ', ',', '.');
+            textSegment = textSegment.Trim(' ', ',');
 
             return textSegment;
         }
