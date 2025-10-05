@@ -174,7 +174,7 @@ namespace Spoomples.Extensions.WildcardImporter
                 }
                 var magesEngine = GetEngine(context);
                 var exprResult = magesEngine.Compile(ConditionExpression)();
-                return exprResult is true or string { Length: > 0 } or double and > 0;
+                return exprResult is not "false" and (true or string { Length: > 0 } or double and > 0);
             }
         }
 
