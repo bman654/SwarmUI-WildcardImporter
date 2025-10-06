@@ -250,6 +250,71 @@ namespace Spoomples.Extensions.WildcardImporter
                         {
                             stringList.Add(stringItem);
                         }
+                        else if (item is List<object>)
+                        {
+                            // this is an anonymous wildcard list.
+                            // process it as a new wildcard, but then
+                            // insert a reference to it in our current stringList
+                            int index = currentList.IndexOf(item);
+                            string nestedPath = $"{currentPath}_anon{index}";
+                            stringList.Add($"__{nestedPath}__");
+                            CollectYamlContent(taskId, nestedPath, item);
+                        }
+                        else if (item is Dictionary<string, object> stringDict)
+                        {
+                            int index = currentList.IndexOf(item);
+                            string nestedPath = $"{currentPath}_anon{index}";
+                            // if the dictionary has 1 entry and the value is a list,
+                            // then this is an anonymous wildcard with the key being the opts for this wildcard entry
+                            // and the list value is the nested anon wildcard
+                            if (stringDict.Count != 1)
+                            {
+                                task.AddWarning($"Invalid anonymous wildcard entry: {currentPath}/{index}");
+                            }
+                            else
+                            {
+                                var kvp = stringDict.First();
+                                string key = kvp.Key;
+                                var value = kvp.Value;
+                                if (value is List<object> valueList)
+                                {
+                                    stringList.Add($"{key}::__{nestedPath}__");
+                                    CollectYamlContent(taskId, nestedPath, value);
+                                }
+                                else
+                                {
+                                    task.AddWarning($"Invalid anonymous wildcard entry: {currentPath}/{index}");
+                                }
+                            }
+                        }
+                        else if (item is Dictionary<object, object> objDict)
+                        {
+                            int index = currentList.IndexOf(item);
+                            string nestedPath = $"{currentPath}_anon{index}";
+                            // if the dictionary has 1 entry and the value is a list,
+                            // then this is an anonymous wildcard with the key being the opts for this wildcard entry
+                            // and the list value is the nested anon wildcard
+                            if (objDict.Count != 1)
+                            {
+                                task.AddWarning($"Invalid anonymous wildcard entry: {currentPath}/{index}");
+                            }
+                            else
+                            {
+                                var kvp = objDict.First();
+                                // Convert key to string - YAML keys should always be convertible to strings
+                                string key = kvp.Key.ToString();
+                                var value = kvp.Value;
+                                if (value is List<object> valueList)
+                                {
+                                    stringList.Add($"{key}::__{nestedPath}__");
+                                    CollectYamlContent(taskId, nestedPath, value);
+                                }
+                                else
+                                {
+                                    task.AddWarning($"Invalid anonymous wildcard entry: {currentPath}/{index}");
+                                }
+                            }
+                        }
                         else
                         {
                             // For non-string items in the list, we recursively process them with an indexed path

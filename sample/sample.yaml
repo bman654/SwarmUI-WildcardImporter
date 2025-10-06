@@ -1,0 +1,53 @@
+﻿yaml:
+  wildcard1:
+    - choice1
+    - choice2
+    - choice3
+
+  wildcard2:
+    - "'label1,label2'4::choice1"
+    - "3:: choice2 "
+    - 5 if _is_sd1::choice4
+
+  wildcard2bis:
+    - __1$$yaml/wildcard2'^yaml/wildcard2bis'__bis
+
+  wildcard2bisbis:
+    - __1$$yaml/wildcard2bis'#^yaml/wildcard2bisbis'__bis
+
+  wildcard3:
+    - __2$$,$$yaml/wildcard2__
+
+  wildcard4: inline text
+
+  wildcard5: inline ${var:default}
+
+  wildcard7:
+    - <lora:test1:1>
+    - <lora:test2:1>
+    - <lora:test3:1>
+
+  more_nested:
+    even_more_nested: # this would be __yaml/more_nested/even_more_nested__
+      - one
+      - two
+
+  anonwildcards:
+    - one
+    - two
+    - # choice without options and anonymous wildcard
+      - three
+      - four
+    - 3 if _is_sdxl: # choice with options and anonymous wildcard
+        - five
+        - six
+    - # choice without options and anonymous wildcard with parameters
+      - nine
+      - ten
+
+  empty_wildcard:
+    - if false::1
+    - if false::2
+    - if false::3
+    - if _sd in ("test1", "test2")::4
+    - if (false or false)::5

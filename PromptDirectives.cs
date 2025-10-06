@@ -156,7 +156,7 @@ namespace Spoomples.Extensions.WildcardImporter
                     {
                         if (double.TryParse(opts, out double parsedWeight))
                         {
-                            Weight = Math.Max(0, parsedWeight);;
+                            Weight = Math.Max(0, parsedWeight);
                         }
                         else
                         {
