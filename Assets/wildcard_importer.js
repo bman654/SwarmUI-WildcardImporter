@@ -823,8 +823,8 @@ promptTabComplete.registerPrefix('wcpopmacro', 'Restores previous macro value fr
 promptTabComplete.registerPrefix('wcmatch', 'Provides conditional logic for prompts using expression evaluation', (prefix) => {
     return [
         '\nUse with <wccase> blocks to create conditional content.',
-        '\nExample: "<wcmatch:<wccase[myvar == \\"value\\"]:content if true><wccase:default content>>"',
-        '\nSupports variable comparisons, logical operators (&&, ||), and string functions.',
+        '\nExample: "<wcmatch:<wccase[myvar eq \"value\"]:content if true><wccase:default content>>"',
+        '\nSupports variable comparisons, logical operators (and, or, not), and string functions.',
         '\nOnly the first matching case will be rendered.'
     ];
 });
@@ -834,7 +834,7 @@ promptTabComplete.registerPrefix('wccase[var_name == "value"]', 'Conditional cas
         '\nMust be used inside a <wcmatch> block.',
         '\nWith condition: "<wccase[condition]:content if condition is true>"',
         '\nDefault case: "<wccase:content if no other cases match>"',
-        '\nSupports expressions like: myvar == "value", contains(myvar, "text"), length(myvar) > 5'
+        '\nSupports expressions like: myvar eq "value", contains(myvar, "text"), length(myvar) > 5'
     ];
 });
 
