@@ -173,8 +173,8 @@ namespace Spoomples.Extensions.WildcardImporter
                     return true;
                 }
                 var magesEngine = GetEngine(context);
-                var exprResult = magesEngine.Compile(ConditionExpression)();
-                return exprResult is not "false" and (true or string { Length: > 0 } or double and > 0);
+                var exprResult = magesEngine.Compile($"any({ConditionExpression})")();
+                return exprResult is true;
             }
         }
 
@@ -526,7 +526,7 @@ namespace Spoomples.Extensions.WildcardImporter
         private static void Match()
         {
             /*
-               <wcmatch:<wccase[myvar == "foo"]:use this value><wccase[myvar == "bar" || myvar.Contains("baz")]:use this value><wccase:default case if nothing else matches>>
+               <wcmatch:<wccase[myvar eq "foo"]:use this value><wccase[myvar eq "bar" or myvar.Contains("baz")]:use this value><wccase:default case if nothing else matches>>
              */
             T2IPromptHandling.PromptTagProcessors["wcmatch"] = (data, context) => WithNewMatchContext(context, () => context.Parse(data));
             T2IPromptHandling.PromptTagLengthEstimators["wcmatch"] = (data, context) => WithNewMatchLengthContext(context, () => T2IPromptHandling.ProcessPromptLikeForLength(data));
@@ -554,8 +554,8 @@ namespace Spoomples.Extensions.WildcardImporter
                 {
                     // parse the expression and see if it is truthy
                     var magesEngine = GetEngine(context);
-                    var exprResult = magesEngine.Compile(expr)();
-                    var isMatch = exprResult is true or string { Length: > 0 } or double and > 0;
+                    var exprResult = magesEngine.Compile($"any({expr})")();
+                    var isMatch = exprResult is true;
                     if (isMatch)
                     {
                         // this case matches the condition, so use it and mark the match as closed.
