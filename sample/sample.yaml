@@ -50,4 +50,10 @@
     - if false::2
     - if false::3
     - if _sd in ("test1", "test2")::4
-    - if (false or false)::5
+    - if (false or _sd not in ("test1", "test2")) and (_sd contains ("t", "2"))::5
+    - if _sd contains "t"::6
+    - if _sd not contains "t"::7
+    - if _sd not in ("test1", "test2")::8
+    - if _sd not contains ("test1", "test2")::9
+    - if not _sd not contains ("test1", "test2")::10
+    - if "2" not eq "1"::11

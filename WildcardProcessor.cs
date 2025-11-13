@@ -2408,52 +2408,61 @@ namespace Spoomples.Extensions.WildcardImporter
             if (string.IsNullOrWhiteSpace(condition))
                 return null;
             
-            // Check for simple variable truthiness (no operators)
-            if (!Regex.IsMatch(condition, @"\s+(eq|ne|gt|lt|ge|le|contains|in|not)\s+", RegexOptions.IgnoreCase))
-            {
-                return condition; // Simple variable check
-            }
+            // replace some operators
+            condition = condition
+                .Replace(" not eq ", " ne ")
+                .Replace(" not ne ", " eq ")
+                .Replace(" not gt ", " le ")
+                .Replace(" not lt ", " ge ")
+                .Replace(" not ge ", " lt ")
+                .Replace(" not le ", " gt ");
             
-            // Parse condition with operators (allow hyphens, underscores in variable names)
-            var conditionMatch = Regex.Match(condition, 
-                @"^\s*([\w\-]+)\s+(not\s+)?(eq|ne|gt|lt|ge|le|contains|in)\s+(.+?)\s*$", 
-                RegexOptions.IgnoreCase);
-                
-            if (!conditionMatch.Success)
+            // Look for phrases of the form "someVar [not] in|contains someExpressionThatEndsOnSpaceButCountNestedParensAndQuotes"
+            var re = new Regex(@"\b(?<var>[\w\-]+)\s+(?<not>not\s+)?(?<op>in|contains)\s+");
+            Match match = null;
+            while ((match = re.Match(condition)).Success)
             {
-                task.AddWarning($"Could not parse condition: {condition}");
-                return null;
-            }
-            
-            string variable = conditionMatch.Groups[1].Value;
-            bool isNot = conditionMatch.Groups[2].Success;
-            string operation = conditionMatch.Groups[3].Value.ToLowerInvariant();
-            string value = conditionMatch.Groups[4].Value.Trim();
-            
-            // Validate operation
-            var validOperations = new[] { "eq", "ne", "gt", "lt", "ge", "le", "contains", "in" };
-            if (!validOperations.Contains(operation))
-            {
-                task.AddWarning($"Could not parse condition: {condition}");
-                return null;
-            }
-            
-            // Validate parentheses matching for list operations
-            if (value.Contains("(") || value.Contains(")"))
-            {
-                int openCount = value.Count(c => c == '(');
-                int closeCount = value.Count(c => c == ')');
-                if (openCount != closeCount)
+                // parse out the 2nd operand by looking for the next whitespace that is not inside a paren or quote pair
+                int start = match.Index + match.Length;
+                int end = start;
+                int nestLevel = 0;
+                bool inQuote = false;
+                while (end < condition.Length)
                 {
-                    task.AddWarning($"Could not parse condition: {condition}");
-                    return null;
+                    char c = condition[end];
+                    if (inQuote)
+                    {
+                        if (c == '"' && condition[end - 1] != '\\')
+                        {
+                            inQuote = false;
+                        }
+                    }
+                    else if (c == '"')
+                    {
+                        inQuote = true;
+                    }
+                    else if (c == '(')
+                    {
+                        nestLevel++;
+                    }
+                    else if (c == ')' && nestLevel > 0)
+                    {
+                        nestLevel--;
+                    }
+                    else if (nestLevel == 0 && !inQuote && !Char.IsLetterOrDigit(c) && c != '_' && c != '-' && c != '+' && c != '.')
+                    {
+                        break;
+                    }
+                    end++;
                 }
+                string value = condition.Substring(start, end - start);
+                var op = match.Groups["op"].Value;
+                var not = match.Groups["not"].Success;
+                var variable = match.Groups["var"].Value;
+                var newExpression = ConvertOperationToWcaseExpression(variable, op, value, not, task);
+                condition = condition.Substring(0, match.Index) + newExpression + condition.Substring(end);
             }
-            
-            // Convert operation to wccase syntax
-            string wcaseExpression = ConvertOperationToWcaseExpression(variable, operation, value, isNot, task);
-            
-            return wcaseExpression;
+            return condition;
         }
 
         /// <summary>
@@ -2557,8 +2566,8 @@ namespace Spoomples.Extensions.WildcardImporter
                 // For normal operations, we use OR
                 joinOperator = " or ";
             }
-            
-            return string.Join(joinOperator, expressions);
+
+            return "(" + string.Join(joinOperator, expressions) + ")";
         }
 
         /// <summary>
