@@ -34,7 +34,9 @@
 
         bool IDictionary<string, object>.ContainsKey(string key)
         {
-            return _context.Macros.ContainsKey(key) || _context.Variables.ContainsKey(key) || _extra.ContainsKey(key);
+            // return _context.Macros.ContainsKey(key) || _context.Variables.ContainsKey(key) || _extra.ContainsKey(key);
+            // we will return empty string instead of null for missing variables so from Mages perspective the key always exists
+            return true;
         }
 
         bool IDictionary<string, object>.Remove(string key)
@@ -54,8 +56,15 @@
                 value = variable;
                 return true;
             }
-            
-            return _extra.TryGetValue(key, out value);
+
+            if (_extra.TryGetValue(key, out value))
+            {
+                return true;
+            }
+
+            // return empty string
+            value = "";
+            return true;
         }
 
         void ICollection<KeyValuePair<string, object>>.Add(KeyValuePair<string, object> item)
