@@ -7,6 +7,7 @@
     {
         private readonly T2IPromptHandling.PromptTagContext _context;
         private readonly Dictionary<string, object> _extra = new();
+        private static readonly HashSet<string> _forbiddenSymbols = new() { "any", "contains", "icontains" };
 
         public PromptTagContextDictionary(T2IPromptHandling.PromptTagContext context)
         {
@@ -36,7 +37,7 @@
         {
             // return _context.Macros.ContainsKey(key) || _context.Variables.ContainsKey(key) || _extra.ContainsKey(key);
             // we will return empty string instead of null for missing variables so from Mages perspective the key always exists
-            return true;
+            return !_forbiddenSymbols.Contains(key);
         }
 
         bool IDictionary<string, object>.Remove(string key)
@@ -62,9 +63,13 @@
                 return true;
             }
 
-            // return empty string
-            value = "";
-            return true;
+            if (!_forbiddenSymbols.Contains(key))
+            {
+                // return empty string
+                value = "";
+                return true;
+            }
+            return false;
         }
 
         void ICollection<KeyValuePair<string, object>>.Add(KeyValuePair<string, object> item)
