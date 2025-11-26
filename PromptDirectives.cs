@@ -172,9 +172,17 @@ namespace Spoomples.Extensions.WildcardImporter
                 {
                     return true;
                 }
-                var magesEngine = GetEngine(context);
-                var exprResult = magesEngine.Compile($"any({ConditionExpression})")();
-                return exprResult is true;
+                try
+                {
+                    var magesEngine = GetEngine(context);
+                    var exprResult = magesEngine.Compile($"any({ConditionExpression})")();
+                    return exprResult is true;
+                }
+                catch (Exception e)
+                {
+                    context.TrackWarning(e.Message);
+                    return false;
+                }
             }
         }
 

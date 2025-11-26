@@ -161,7 +161,7 @@ namespace Spoomples.Extensions.WildcardImporter
             }
             catch (TargetInvocationException ex)
             {
-                throw new InvalidOperationException($"Mages compilation error: {ex.InnerException?.Message ?? ex.Message}", ex.InnerException ?? ex);
+                throw new InvalidOperationException($"Unable to parse expression. {ex.InnerException?.Message ?? ex.Message}: {expression}", ex.InnerException ?? ex);
             }
         }
 
