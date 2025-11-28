@@ -7,7 +7,7 @@
     {
         private readonly T2IPromptHandling.PromptTagContext _context;
         private readonly Dictionary<string, object> _extra = new();
-        private static readonly HashSet<string> _forbiddenSymbols = new() { "any", "contains", "icontains" };
+        private static readonly HashSet<string> _forbiddenSymbols = new() { "any", "contains", "icontains", "length" };
 
         public PromptTagContextDictionary(T2IPromptHandling.PromptTagContext context)
         {
