@@ -720,7 +720,7 @@ namespace Spoomples.Extensions.WildcardImporter
                 result.Insert(varStartIndex, replacement);
                 
                 // Update the start index for the next search
-                startIndex = varStartIndex + replacement.Length;
+                //startIndex = varStartIndex + replacement.Length;
             }
             
             return result.ToString();
