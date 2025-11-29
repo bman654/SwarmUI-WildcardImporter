@@ -386,6 +386,40 @@ namespace Spoomples.Extensions.WildcardImporter
             
             Logs.Info($"Completed processing all files with wildcard references");
         }
+        
+        private string ProcessWildcards(string line, string taskId)
+        {
+            var openChars = new[] {'{', '<', '('};
+            var closeChars = new[] {'}', '>', ')'};
+            int pos = 0;
+            while ((pos = line.IndexOf("__", pos, StringComparison.Ordinal)) != -1)
+            {
+                int endPos = pos + 2;
+                while (true)
+                {
+                    endPos = FindTopLevelChar(line, endPos, '_', openChars, closeChars, true);
+                    if (endPos == -1)
+                    {
+                        break;
+                    }
+                    if (line.Substring(endPos, 2) == "__")
+                    {
+                        endPos++;
+                        break;
+                    }
+                    endPos++;
+                }
+                if (endPos == -1)
+                {
+                    break;
+                }
+                
+                string content = line.Substring(pos + 2, endPos - pos - 3);
+                string newContent = ProcessWildcardRef(content, taskId);
+                line = line.Substring(0, pos) + newContent + line.Substring(endPos + 1);
+            }
+            return line;
+        }
 
         private string ProcessWildcardLine(string line, string taskId)
         {
@@ -395,12 +429,7 @@ namespace Spoomples.Extensions.WildcardImporter
             // Replace __wildcards__
             // Matches should include:
             // 1. __word__
-            var wildcardPattern = @"__(?<content>.+?)__";
-            line = System.Text.RegularExpressions.Regex.Replace(line, wildcardPattern, match => 
-            {
-                string content = match.Groups["content"].Value;
-                return ProcessWildcardRef(content, taskId);
-            });
+            line = ProcessWildcards(line, taskId);
             
             line = ProcessVariables(line, _tasks[taskId]);
             
@@ -1266,9 +1295,10 @@ namespace Spoomples.Extensions.WildcardImporter
         /// <param name="openChars">Array of opening bracket characters to track nesting.</param>
         /// <param name="closeChars">Array of closing bracket characters to track nesting.</param>
         /// <returns>The index of the target character at top level, or -1 if not found.</returns>
-        private int FindTopLevelChar(string input, int startIndex, char targetChar, char[] openChars, char[] closeChars)
+        private int FindTopLevelChar(string input, int startIndex, char targetChar, char[] openChars, char[] closeChars, bool handleQuotes = false)
         {
             int[] nestingLevels = new int[openChars.Length];
+            char quote = ' ';
             
             for (int i = startIndex; i < input.Length; i++)
             {
@@ -1277,6 +1307,23 @@ namespace Spoomples.Extensions.WildcardImporter
                     continue;
                 
                 char c = input[i];
+                if (handleQuotes && (c == '"' || c == '\''))
+                {
+                    if (quote == ' ')
+                    {
+                        quote = c;
+                    }
+                    else if (c == quote)
+                    {
+                        quote = ' ';
+                    }
+                    continue;
+                }
+                
+                if (quote != ' ')
+                {
+                    continue;
+                }
                 
                 // Update nesting levels
                 for (int j = 0; j < openChars.Length; j++)
@@ -1742,10 +1789,10 @@ namespace Spoomples.Extensions.WildcardImporter
             {
                 string result = "";
                 
-                // Add push macros for each variable (in order)
+                // Add push variables and push macros for each variable (in order)
                 foreach (var (varName, varValue) in variableOverrides)
                 {
-                    result += $"<wcpushmacro[{varName}]:{varValue}>";
+                    result += $"<wcpushvar[{varName}]:{varValue}><wcpushmacro[{varName}]:<var:{varName}>>";
                 }
                 
                 // Add the base wildcard result
@@ -1754,7 +1801,7 @@ namespace Spoomples.Extensions.WildcardImporter
                 // Add pop macros for each variable (in reverse order)
                 for (int i = variableOverrides.Count - 1; i >= 0; i--)
                 {
-                    result += $"<wcpopmacro:{variableOverrides[i].varName}>";
+                    result += $"<wcpopmacro:{variableOverrides[i].varName}><wcpopvar:{variableOverrides[i].varName}>";
                 }
                 
                 return result;
