@@ -11,7 +11,7 @@ namespace Spoomples.Extensions.WildcardImporter
     public class WildcardProcessor
     {
         private readonly YamlParser _yamlParser;
-        
+
         // TODO: Allow setting the destination folder via API. Users might want to set it to their own custom folder.
         public readonly string destinationFolder = Utilities.CombinePathWithAbsolute(Program.ServerSettings.Paths.DataPath, Program.ServerSettings.Paths.WildcardsFolder);
         private readonly ConcurrentDictionary<string, ProcessingTask> _tasks = new();
@@ -93,11 +93,12 @@ namespace Spoomples.Extensions.WildcardImporter
                     await ProcessCollectedFiles(taskId);
 
                     task.InMemoryFiles.Clear(); // free up some memory
-                    
+
                     if (task.Errors.Count == 0)
                     {
                         task.Status = ProcessingStatusEnum.Completed;
-                        _history.Add(new ProcessingHistoryItem {
+                        _history.Add(new ProcessingHistoryItem
+                        {
                             TaskId = taskId,
                             Timestamp = DateTime.UtcNow,
                             Name = String.IsNullOrWhiteSpace(task.Prefix) ? "Wildcard" : task.Prefix.TrimEnd('/'),
@@ -109,7 +110,8 @@ namespace Spoomples.Extensions.WildcardImporter
                     else
                     {
                         task.Status = ProcessingStatusEnum.Failed;
-                        _history.Add(new ProcessingHistoryItem {
+                        _history.Add(new ProcessingHistoryItem
+                        {
                             TaskId = taskId,
                             Timestamp = DateTime.UtcNow,
                             Name = String.IsNullOrWhiteSpace(task.Prefix) ? "Wildcard" : task.Prefix.TrimEnd('/'),
@@ -125,7 +127,8 @@ namespace Spoomples.Extensions.WildcardImporter
                     task.Errors.Add($"Error processing files: {ex.Message}");
                     Logs.Error($"Error processing files: {ex.ReadableString()}");
                     task.InMemoryFiles.Clear(); // free up some memory
-                    _history.Add(new ProcessingHistoryItem {
+                    _history.Add(new ProcessingHistoryItem
+                    {
                         TaskId = taskId,
                         Timestamp = DateTime.UtcNow,
                         Name = String.IsNullOrWhiteSpace(task.Prefix) ? "Wildcard" : task.Prefix.TrimEnd('/'),
@@ -204,7 +207,7 @@ namespace Spoomples.Extensions.WildcardImporter
         {
             Logs.Debug($"Collecting YAML content: {currentPath}");
             var task = _tasks[taskId];
-            
+
             // Handle Dictionary<string, object>
             if (currentValue == null)
             {
@@ -335,7 +338,7 @@ namespace Spoomples.Extensions.WildcardImporter
                 // Store in memory with path structure - now using the full path
                 task.InMemoryFiles.TryAdd(currentPath, new List<string> { stringValue });
             }
-            else 
+            else
             {
                 task.AddWarning($"Unknown YAML value type: {currentValue.GetType()}; path: {currentPath}; value: {currentValue}");
             }
@@ -346,10 +349,10 @@ namespace Spoomples.Extensions.WildcardImporter
             var task = _tasks[taskId];
             Logs.Debug($"Collecting text file contents: {fileName}");
             var lines = content.Split('\n');
-            
+
             // Store in memory with just the filename
             task.InMemoryFiles.TryAdd(fileName, lines.ToList());
-            
+
             Logs.Debug($"Text file contents collected: {fileName}");
         }
 
@@ -357,19 +360,19 @@ namespace Spoomples.Extensions.WildcardImporter
         {
             var task = _tasks[taskId];
             Logs.Info($"Processing collected files");
-            
+
             foreach (var fileEntry in task.InMemoryFiles)
             {
                 string filePath = fileEntry.Key;
                 List<string> lines = fileEntry.Value;
-                
+
                 // Process each line in the file
                 List<string> processedLines = new List<string>();
                 foreach (var line in lines)
                 {
                     processedLines.Add(ProcessWildcardLine(line, taskId));
                 }
-                
+
                 // Regular text file
                 string outputPath = Path.Combine(destinationFolder, task.Prefix + filePath);
                 if (!outputPath.EndsWith(".txt", StringComparison.InvariantCultureIgnoreCase))
@@ -378,19 +381,19 @@ namespace Spoomples.Extensions.WildcardImporter
                 }
 
                 Logs.Debug($"Writing processed lines to: {outputPath}");
-                
+
                 Directory.CreateDirectory(Path.GetDirectoryName(outputPath));
                 await File.WriteAllLinesAsync(outputPath, processedLines);
                 task.OutFilesProcessed++;
             }
-            
+
             Logs.Info($"Completed processing all files with wildcard references");
         }
-        
+
         private string ProcessWildcards(string line, string taskId)
         {
-            var openChars = new[] {'{', '<', '('};
-            var closeChars = new[] {'}', '>', ')'};
+            var openChars = new[] { '{', '<', '(' };
+            var closeChars = new[] { '}', '>', ')' };
             int pos = 0;
             while ((pos = line.IndexOf("__", pos, StringComparison.Ordinal)) != -1)
             {
@@ -413,7 +416,7 @@ namespace Spoomples.Extensions.WildcardImporter
                 {
                     break;
                 }
-                
+
                 string content = line.Substring(pos + 2, endPos - pos - 3);
                 string newContent = ProcessWildcardRef(content, taskId);
                 line = line.Substring(0, pos) + newContent + line.Substring(endPos + 1);
@@ -424,35 +427,35 @@ namespace Spoomples.Extensions.WildcardImporter
         private string ProcessWildcardLine(string line, string taskId)
         {
             Logs.Verbose($"WildcardProcessor: ProcessWildcardLine called with line='{line}'");
-            
+
             // See https://github.com/adieyal/sd-dynamic-prompts/blob/main/docs/SYNTAX.md#wildcards
             // Replace __wildcards__
             // Matches should include:
             // 1. __word__
             line = ProcessWildcards(line, taskId);
-            
+
             line = ProcessVariables(line, _tasks[taskId]);
-            
+
             // Process set commands BEFORE other processing
             line = ProcessSetCommands(line, _tasks[taskId]);
-            
+
             // Process echo commands BEFORE other processing
             line = ProcessEchoCommands(line, _tasks[taskId]);
-            
+
             // Process if commands BEFORE other processing
             line = ProcessIfCommands(line, _tasks[taskId]);
-            
+
             // Process STN commands BEFORE other processing
             line = ProcessStnCommands(line, _tasks[taskId]);
-            
+
             // Process prompt editing BEFORE negative attention to avoid conflicts
             // [from:to:step] -> <fromto[step]:from||to>
             line = ProcessPromptEditing(line, _tasks[taskId]);
-            
+
             // Process alternating words AFTER prompt editing but BEFORE negative attention
             // [word1|word2|word3] -> <alternate:word1||word2||word3>
             line = ProcessAlternatingWords(line, _tasks[taskId]);
-            
+
             // Process negative attention specifiers: [text] -> (text:0.9)
             line = ProcessNegativeAttention(line, taskId);
 
@@ -490,10 +493,10 @@ namespace Spoomples.Extensions.WildcardImporter
             // Only replace capital BREAK that is a standalone word
             // Protect BREAK if it has non-space, non-comma characters on either side
             // This naturally protects wildcard paths (__path/BREAK/file__) and variable names (${BREAK})
-            
+
             var result = new StringBuilder();
             int i = 0;
-            
+
             while (i < input.Length)
             {
                 // Check if we're at the start of "BREAK"
@@ -502,7 +505,7 @@ namespace Spoomples.Extensions.WildcardImporter
                     // Check if BREAK has non-space, non-comma characters on either side
                     bool hasProtectedCharBefore = i > 0 && input[i - 1] != ' ' && input[i - 1] != ',' && input[i - 1] != '\t' && input[i - 1] != '\n' && input[i - 1] != '\r';
                     bool hasProtectedCharAfter = i + 5 < input.Length && input[i + 5] != ' ' && input[i + 5] != ',' && input[i + 5] != '\t' && input[i + 5] != '\n' && input[i + 5] != '\r';
-                    
+
                     // Only replace BREAK if it doesn't have protected characters on either side
                     if (!hasProtectedCharBefore && !hasProtectedCharAfter)
                     {
@@ -512,14 +515,14 @@ namespace Spoomples.Extensions.WildcardImporter
                         continue;
                     }
                 }
-                
+
                 result.Append(input[i]);
                 i++;
             }
-            
+
             return result.ToString();
         }
-        
+
         /// <summary>
         /// Post-processes wildcard choice labels by converting quoted labels to parentheses.
         /// If the line contains "::" before the first "<" and starts with quoted labels,
@@ -532,23 +535,23 @@ namespace Spoomples.Extensions.WildcardImporter
             // Check if the line has "::" before the first "<"
             int firstAngleBracket = line.IndexOf('<');
             int doubleColon = line.IndexOf("::");
-            
+
             if (doubleColon == -1 || (firstAngleBracket != -1 && doubleColon >= firstAngleBracket))
             {
                 // No "::" before first "<", or no "::" at all
                 return line;
             }
-            
+
             // Check if the line starts with quoted labels
             (string opts, string value) = line.BeforeAndAfter("::");
             opts = opts.Trim();
-            
+
             // adjust any potential "if" expressions
             var ifMatch = PromptDirectives.IfConditionRE().Match(opts);
             if (ifMatch.Success)
             {
                 var ifExpr = ifMatch.Groups["expr"].Value;
-                opts = $"{opts.Substring(0, ifMatch.Index).Trim()} if {ProcessCondition(ifExpr, task)}";  
+                opts = $"{opts.Substring(0, ifMatch.Index).Trim()} if {ProcessCondition(ifExpr, task)}";
             }
 
             // Check for single quotes: 'labels'
@@ -557,7 +560,7 @@ namespace Spoomples.Extensions.WildcardImporter
                 int endQuote = opts.IndexOf("'", 1);
                 string labels = opts.Substring(1, endQuote - 1);
                 string afterLabels = opts.Substring(endQuote + 1);
-                
+
                 Logs.Debug($"WildcardProcessor: Converting single-quoted labels '{labels}' to ({labels})");
                 opts = $"({labels}){afterLabels}";
             }
@@ -566,11 +569,11 @@ namespace Spoomples.Extensions.WildcardImporter
                 int endQuote = opts.IndexOf("\"", 1);
                 string labels = opts.Substring(1, endQuote - 1);
                 string afterLabels = opts.Substring(endQuote + 1);
-                
+
                 Logs.Debug($"WildcardProcessor: Converting double-quoted labels \"{labels}\" to ({labels})");
                 opts = $"({labels}){afterLabels}";
             }
-            
+
             // No quoted labels found at the start
             return $"{opts}::{value}";
         }
@@ -587,29 +590,29 @@ namespace Spoomples.Extensions.WildcardImporter
              */
             var result = new StringBuilder(input);
             var startIndex = 0;
-            
+
             while (true)
             {
                 // Find the next variable pattern
                 var varStartIndex = result.ToString().IndexOf("${", startIndex, StringComparison.Ordinal);
                 if (varStartIndex == -1)
                     break;
-                
+
                 // Find the matching closing brace
                 int openBraceIndex = varStartIndex + 1; // +1 to get the index of the actual '{' character
                 int closeBraceIndex = FindMatchingClosingBrace(result.ToString(), openBraceIndex);
-                
+
                 if (closeBraceIndex == -1)
                 {
                     // No matching closing brace found, move past this opening and continue
                     startIndex = varStartIndex + 2;
                     continue;
                 }
-                
+
                 // Extract the variable content (without the ${})
                 string varContent = result.ToString().Substring(varStartIndex + 2, closeBraceIndex - varStartIndex - 2);
                 string replacement;
-                
+
                 // Check for completely empty variable content: ${}
                 if (string.IsNullOrWhiteSpace(varContent))
                 {
@@ -624,12 +627,12 @@ namespace Spoomples.Extensions.WildcardImporter
                     // Variable assignment - check for special operators
                     string varName = varContent.Substring(0, equalsIndex);
                     string varValue = varContent.Substring(equalsIndex + 1);
-                    
+
                     // Check for add operator (+=)
                     if (varName.EndsWith("+"))
                     {
                         varName = varName.Substring(0, varName.Length - 1);
-                        
+
                         // Immediate add or deferred add?
                         if (varValue.StartsWith("!"))
                         {
@@ -647,7 +650,7 @@ namespace Spoomples.Extensions.WildcardImporter
                     else if (varName.EndsWith("?"))
                     {
                         varName = varName.Substring(0, varName.Length - 1);
-                        
+
                         // Immediate ifundefined or deferred ifundefined?
                         if (varValue.StartsWith("!"))
                         {
@@ -686,7 +689,7 @@ namespace Spoomples.Extensions.WildcardImporter
                         // Variable with default: ${var:default}
                         string variableName = varContent.Substring(0, colonIndex).Trim();
                         string defaultValue = varContent.Substring(colonIndex + 1);
-                        
+
                         // Check for malformed cases (empty variable name)
                         if (string.IsNullOrWhiteSpace(variableName))
                         {
@@ -703,7 +706,7 @@ namespace Spoomples.Extensions.WildcardImporter
                         {
                             // Process the default value recursively to handle nested syntax
                             string processedDefault = ProcessWildcardLine(defaultValue, task.Id);
-                            
+
                             // Return wcmatch with condition for empty variable and else clause
                             replacement = $"<wcmatch:<wccase[length({variableName}) eq 0]:{processedDefault}><wccase:<macro:{variableName}>>>";
                         }
@@ -714,15 +717,15 @@ namespace Spoomples.Extensions.WildcardImporter
                         replacement = $"<macro:{varContent}>";
                     }
                 }
-                
+
                 // Replace the entire variable expression with the new format
                 result.Remove(varStartIndex, closeBraceIndex - varStartIndex + 1);
                 result.Insert(varStartIndex, replacement);
-                
+
                 // Update the start index for the next search
                 //startIndex = varStartIndex + replacement.Length;
             }
-            
+
             return result.ToString();
         }
 
@@ -739,14 +742,14 @@ namespace Spoomples.Extensions.WildcardImporter
              */
             var result = new StringBuilder(input);
             var startIndex = 0;
-            
+
             while (true)
             {
                 // Find the next set command pattern
                 var setStartIndex = result.ToString().IndexOf("<ppp:set ", startIndex, StringComparison.Ordinal);
                 if (setStartIndex == -1)
                     break;
-                
+
                 // Find the matching closing tag
                 var setEndIndex = result.ToString().IndexOf("<ppp:/set>", setStartIndex, StringComparison.Ordinal);
                 if (setEndIndex == -1)
@@ -756,10 +759,10 @@ namespace Spoomples.Extensions.WildcardImporter
                     startIndex = setStartIndex + 9; // length of "<ppp:set "
                     continue;
                 }
-                
+
                 // Extract the set command content
                 string setContent = result.ToString().Substring(setStartIndex + 9, setEndIndex - setStartIndex - 9); // 9 = length of "<ppp:set "
-                
+
                 // Find where the variable name and modifiers end (look for >)
                 int valueStartIndex = setContent.IndexOf('>');
                 if (valueStartIndex == -1)
@@ -769,16 +772,16 @@ namespace Spoomples.Extensions.WildcardImporter
                     startIndex = setStartIndex + 9;
                     continue;
                 }
-                
+
                 string varAndModifiers = setContent.Substring(0, valueStartIndex).Trim();
                 string value = setContent.Substring(valueStartIndex + 1);
-                
+
                 // Handle empty values
                 if (string.IsNullOrEmpty(value))
                 {
                     value = "<comment:empty>";
                 }
-                
+
                 // Parse variable name and modifiers
                 string[] parts = varAndModifiers.Split(new char[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
                 if (parts.Length == 0)
@@ -788,10 +791,10 @@ namespace Spoomples.Extensions.WildcardImporter
                     startIndex = setStartIndex + 9;
                     continue;
                 }
-                
+
                 string varName = parts[0];
                 var modifiers = new HashSet<string>(parts.Skip(1), StringComparer.OrdinalIgnoreCase);
-                
+
                 // Check for invalid modifier combinations
                 if (modifiers.Contains("add") && modifiers.Contains("ifundefined"))
                 {
@@ -800,9 +803,9 @@ namespace Spoomples.Extensions.WildcardImporter
                     startIndex = setEndIndex + 10; // length of "<ppp:/set>"
                     continue;
                 }
-                
+
                 string replacement;
-                
+
                 // Generate appropriate replacement based on modifiers
                 if (modifiers.Contains("ifundefined"))
                 {
@@ -843,16 +846,16 @@ namespace Spoomples.Extensions.WildcardImporter
                         replacement = $"<setmacro[{varName},false]:{value}>";
                     }
                 }
-                
+
                 // Replace the entire set command with the new format
                 int totalLength = setEndIndex - setStartIndex + 10; // +10 for "<ppp:/set>"
                 result.Remove(setStartIndex, totalLength);
                 result.Insert(setStartIndex, replacement);
-                
+
                 // Update the start index for the next search
                 startIndex = setStartIndex + replacement.Length;
             }
-            
+
             return result.ToString();
         }
 
@@ -860,51 +863,51 @@ namespace Spoomples.Extensions.WildcardImporter
         {
             var result = new StringBuilder(input);
             var startIndex = 0;
-            
+
             while (true)
             {
                 // Find the next bracket that could be alternating words
                 var bracketStartIndex = result.ToString().IndexOf("[", startIndex, StringComparison.Ordinal);
                 if (bracketStartIndex == -1)
                     break;
-                
+
                 // Check if this bracket is escaped
                 if (bracketStartIndex > 0 && result[bracketStartIndex - 1] == '\\')
                 {
                     startIndex = bracketStartIndex + 1;
                     continue;
                 }
-                
+
                 // Check if this bracket is part of SwarmUI syntax (inside < >)
                 if (IsInsideSwarmUITag(result.ToString(), bracketStartIndex))
                 {
                     startIndex = bracketStartIndex + 1;
                     continue;
                 }
-                
+
                 // Find the matching closing bracket
                 int closeBracketIndex = FindMatchingClosingSquareBracket(result.ToString(), bracketStartIndex);
-                
+
                 if (closeBracketIndex == -1)
                 {
                     // No matching closing bracket found, move past this opening and continue
                     startIndex = bracketStartIndex + 1;
                     continue;
                 }
-                
+
                 // Extract the content inside the brackets (without the [])
                 string content = result.ToString().Substring(bracketStartIndex + 1, closeBracketIndex - bracketStartIndex - 1);
-                
+
                 // Check if this is alternating words syntax: [word1|word2|...]
                 if (IsAlternatingWordsSyntax(content))
                 {
                     // Process as alternating words
                     string replacement = ProcessAlternatingWordsContent(content, task);
-                    
+
                     // Replace the entire alternating words expression with the new format
                     result.Remove(bracketStartIndex, closeBracketIndex - bracketStartIndex + 1);
                     result.Insert(bracketStartIndex, replacement);
-                    
+
                     // Update the start index for the next search
                     startIndex = bracketStartIndex + replacement.Length;
                 }
@@ -914,10 +917,10 @@ namespace Spoomples.Extensions.WildcardImporter
                     startIndex = bracketStartIndex + 1;
                 }
             }
-            
+
             return result.ToString();
         }
-        
+
         /// <summary>
         /// Checks if the content inside brackets matches alternating words syntax: word1|word2|...
         /// Must have at least 2 options separated by pipes at the top level.
@@ -929,25 +932,25 @@ namespace Spoomples.Extensions.WildcardImporter
             // Find pipes at the top level (not inside nested structures)
             char[] openChars = { '{', '[', '<' };
             char[] closeChars = { '}', ']', '>' };
-            
+
             var pipeIndices = new List<int>();
             int searchStart = 0;
-            
+
             while (true)
             {
                 int pipeIndex = FindTopLevelChar(content, searchStart, '|', openChars, closeChars);
                 if (pipeIndex == -1)
                     break;
-                    
+
                 pipeIndices.Add(pipeIndex);
                 searchStart = pipeIndex + 1;
             }
-            
+
             // Must have at least 1 pipe (meaning at least 2 options) for alternating words
             // If no pipes, it should be treated as negative attention
             return pipeIndices.Count >= 1;
         }
-        
+
         /// <summary>
         /// Processes alternating words content and converts it to SwarmUI syntax.
         /// </summary>
@@ -959,10 +962,10 @@ namespace Spoomples.Extensions.WildcardImporter
             // Split on pipes at the top level
             char[] openChars = { '{', '[', '<' };
             char[] closeChars = { '}', ']', '>' };
-            
+
             var options = new List<string>();
             int lastIndex = 0;
-            
+
             while (true)
             {
                 int pipeIndex = FindTopLevelChar(content, lastIndex, '|', openChars, closeChars);
@@ -981,7 +984,7 @@ namespace Spoomples.Extensions.WildcardImporter
                     }
                     break;
                 }
-                
+
                 // Add the current option
                 string option = content.Substring(lastIndex, pipeIndex - lastIndex);
                 if (string.IsNullOrEmpty(option.Trim()))
@@ -993,10 +996,10 @@ namespace Spoomples.Extensions.WildcardImporter
                     // Recursively process the option to handle nested syntax
                     options.Add(ProcessWildcardLine(option, task.Id));
                 }
-                
+
                 lastIndex = pipeIndex + 1;
             }
-            
+
             // Join with double pipes for SwarmUI alternate syntax
             return $"<alternate:{string.Join("||", options)}>";
         }
@@ -1005,51 +1008,51 @@ namespace Spoomples.Extensions.WildcardImporter
         {
             var result = new StringBuilder(input);
             var startIndex = 0;
-            
+
             while (true)
             {
                 // Find the next bracket that could be prompt editing
                 var bracketStartIndex = result.ToString().IndexOf("[", startIndex, StringComparison.Ordinal);
                 if (bracketStartIndex == -1)
                     break;
-                
+
                 // Check if this bracket is escaped
                 if (bracketStartIndex > 0 && result[bracketStartIndex - 1] == '\\')
                 {
                     startIndex = bracketStartIndex + 1;
                     continue;
                 }
-                
+
                 // Check if this bracket is part of SwarmUI syntax (inside < >)
                 if (IsInsideSwarmUITag(result.ToString(), bracketStartIndex))
                 {
                     startIndex = bracketStartIndex + 1;
                     continue;
                 }
-                
+
                 // Find the matching closing bracket
                 int closeBracketIndex = FindMatchingClosingSquareBracket(result.ToString(), bracketStartIndex);
-                
+
                 if (closeBracketIndex == -1)
                 {
                     // No matching closing bracket found, move past this opening and continue
                     startIndex = bracketStartIndex + 1;
                     continue;
                 }
-                
+
                 // Extract the content inside the brackets (without the [])
                 string content = result.ToString().Substring(bracketStartIndex + 1, closeBracketIndex - bracketStartIndex - 1);
-                
+
                 // Check if this is prompt editing syntax: [from:to:step]
                 if (IsPromptEditingSyntax(content))
                 {
                     // Process as prompt editing
                     string replacement = ProcessPromptEditingContent(content, task);
-                    
+
                     // Replace the entire prompt editing expression with the new format
                     result.Remove(bracketStartIndex, closeBracketIndex - bracketStartIndex + 1);
                     result.Insert(bracketStartIndex, replacement);
-                    
+
                     // Update the start index for the next search
                     startIndex = bracketStartIndex + replacement.Length;
                 }
@@ -1059,10 +1062,10 @@ namespace Spoomples.Extensions.WildcardImporter
                     startIndex = bracketStartIndex + 1;
                 }
             }
-            
+
             return result.ToString();
         }
-        
+
         /// <summary>
         /// Checks if the content inside brackets matches prompt editing syntax: from:to:step
         /// where step must be a valid number.
@@ -1074,25 +1077,25 @@ namespace Spoomples.Extensions.WildcardImporter
             // Find colons at the top level (not inside nested structures)
             char[] openChars = { '{', '[', '<' };
             char[] closeChars = { '}', ']', '>' };
-            
+
             var colonIndices = new List<int>();
             int searchStart = 0;
-            
+
             while (true)
             {
                 int colonIndex = FindTopLevelChar(content, searchStart, ':', openChars, closeChars);
                 if (colonIndex == -1)
                     break;
-                    
+
                 colonIndices.Add(colonIndex);
                 searchStart = colonIndex + 1;
             }
-            
+
             // Must have exactly 2 colons for prompt editing syntax [a:b:c]
             // We don't validate what 'c' contains - let SwarmUI validate parameters at runtime
             return colonIndices.Count == 2;
         }
-        
+
         /// <summary>
         /// Processes prompt editing content and converts it to SwarmUI syntax.
         /// </summary>
@@ -1104,30 +1107,30 @@ namespace Spoomples.Extensions.WildcardImporter
             // Find colons at the top level
             char[] openChars = { '{', '[', '<' };
             char[] closeChars = { '}', ']', '>' };
-            
+
             var colonIndices = new List<int>();
             int searchStart = 0;
-            
+
             while (true)
             {
                 int colonIndex = FindTopLevelChar(content, searchStart, ':', openChars, closeChars);
                 if (colonIndex == -1)
                     break;
-                    
+
                 colonIndices.Add(colonIndex);
                 searchStart = colonIndex + 1;
             }
-            
+
             // Extract the three parts
             string fromPart = content.Substring(0, colonIndices[0]);
             string toPart = content.Substring(colonIndices[0] + 1, colonIndices[1] - colonIndices[0] - 1);
             string stepPart = content.Substring(colonIndices[1] + 1);
-            
+
             // Recursively process from, to, and step parts to handle nested syntax
             string processedFrom = string.IsNullOrEmpty(fromPart.Trim()) ? "<comment:empty>" : ProcessWildcardLine(fromPart, task.Id);
             string processedTo = string.IsNullOrEmpty(toPart.Trim()) ? "<comment:empty>" : ProcessWildcardLine(toPart, task.Id);
             string processedStep = string.IsNullOrEmpty(stepPart.Trim()) ? "<comment:empty>" : ProcessWildcardLine(stepPart, task.Id);
-            
+
             return $"<fromto[{processedStep}]:{processedFrom}||{processedTo}>";
         }
 
@@ -1136,56 +1139,56 @@ namespace Spoomples.Extensions.WildcardImporter
             // Use a recursive approach to handle nested brackets properly
             return ProcessNegativeAttentionRecursive(input, taskId);
         }
-        
+
         private string ProcessNegativeAttentionRecursive(string input, string taskId)
         {
             var result = new StringBuilder(input);
             var startIndex = 0;
-            
+
             while (true)
             {
                 // Find the next negative attention pattern
                 var bracketStartIndex = result.ToString().IndexOf("[", startIndex, StringComparison.Ordinal);
                 if (bracketStartIndex == -1)
                     break;
-                
+
                 // Check if this bracket is escaped
                 if (bracketStartIndex > 0 && result[bracketStartIndex - 1] == '\\')
                 {
                     startIndex = bracketStartIndex + 1;
                     continue;
                 }
-                
+
                 // Check if this bracket is part of SwarmUI syntax (inside < >)
                 if (IsInsideSwarmUITag(result.ToString(), bracketStartIndex))
                 {
                     startIndex = bracketStartIndex + 1;
                     continue;
                 }
-                
+
                 // Find the matching closing bracket for this level
                 int closeBracketIndex = FindMatchingClosingSquareBracket(result.ToString(), bracketStartIndex);
-                
+
                 if (closeBracketIndex == -1)
                 {
                     // No matching closing bracket found, move past this opening and continue
                     startIndex = bracketStartIndex + 1;
                     continue;
                 }
-                
+
                 // Extract the content inside the brackets (without the [])
                 string content = result.ToString().Substring(bracketStartIndex + 1, closeBracketIndex - bracketStartIndex - 1);
-                
+
                 // Recursively process the content first to handle nested brackets
                 string processedContent = ProcessNegativeAttentionRecursive(content, taskId);
-                
+
                 // Then process wildcard constructs within the content
                 processedContent = ProcessWildcardLine(processedContent, taskId);
-                
+
                 // Calculate the weight - if already processed, compound it
                 double weight = 0.9;
                 string finalContent = processedContent;
-                
+
                 // Check if the processed content is already an attention specifier
                 var attentionMatch = System.Text.RegularExpressions.Regex.Match(processedContent, @"^\((.+?):([0-9.]+)\)$");
                 if (attentionMatch.Success)
@@ -1196,18 +1199,18 @@ namespace Spoomples.Extensions.WildcardImporter
                         weight = existingWeight * 0.9; // Compound the weight
                     }
                 }
-                
+
                 // Transform to ComfyUI positive attention format
                 string replacement = $"({finalContent}:{weight:0.###})";
-                
+
                 // Replace the entire negative attention expression with the new format
                 result.Remove(bracketStartIndex, closeBracketIndex - bracketStartIndex + 1);
                 result.Insert(bracketStartIndex, replacement);
-                
+
                 // Update the start index for the next search
                 startIndex = bracketStartIndex + replacement.Length;
             }
-            
+
             return result.ToString();
         }
 
@@ -1221,7 +1224,7 @@ namespace Spoomples.Extensions.WildcardImporter
         {
             // Track nesting level of angle brackets to properly handle nested SwarmUI tags
             int angleDepth = 0;
-            
+
             for (int i = 0; i < bracketIndex; i++)
             {
                 if (input[i] == '<')
@@ -1233,7 +1236,7 @@ namespace Spoomples.Extensions.WildcardImporter
                     angleDepth--;
                 }
             }
-            
+
             // If angleDepth > 0, we're inside SwarmUI tags
             return angleDepth > 0;
         }
@@ -1249,7 +1252,7 @@ namespace Spoomples.Extensions.WildcardImporter
         {
             return FindMatchingClosingBracket(input, openBracketIndex, '[', ']');
         }
-        
+
         /// <summary>
         /// Generic method to find matching closing bracket/brace for any bracket type.
         /// Handles nested brackets properly by counting bracket depth and respects escaped characters.
@@ -1262,13 +1265,13 @@ namespace Spoomples.Extensions.WildcardImporter
         private int FindMatchingClosingBracket(string input, int openIndex, char openChar, char closeChar)
         {
             int bracketLevel = 1;
-            
+
             for (int i = openIndex + 1; i < input.Length; i++)
             {
                 // Check if this bracket is escaped
                 if (i > 0 && input[i - 1] == '\\')
                     continue;
-                    
+
                 if (input[i] == openChar)
                 {
                     bracketLevel++;
@@ -1282,10 +1285,10 @@ namespace Spoomples.Extensions.WildcardImporter
                     }
                 }
             }
-            
+
             return -1;
         }
-        
+
         /// <summary>
         /// Finds the index of the next unescaped character at the top nesting level.
         /// </summary>
@@ -1299,13 +1302,13 @@ namespace Spoomples.Extensions.WildcardImporter
         {
             int[] nestingLevels = new int[openChars.Length];
             char quote = ' ';
-            
+
             for (int i = startIndex; i < input.Length; i++)
             {
                 // Check if this character is escaped
                 if (i > 0 && input[i - 1] == '\\')
                     continue;
-                
+
                 char c = input[i];
                 if (handleQuotes && (c == '"' || c == '\''))
                 {
@@ -1319,12 +1322,12 @@ namespace Spoomples.Extensions.WildcardImporter
                     }
                     continue;
                 }
-                
+
                 if (quote != ' ')
                 {
                     continue;
                 }
-                
+
                 // Update nesting levels
                 for (int j = 0; j < openChars.Length; j++)
                 {
@@ -1337,14 +1340,14 @@ namespace Spoomples.Extensions.WildcardImporter
                         nestingLevels[j]--;
                     }
                 }
-                
+
                 // Check if we found the target character at top level
                 if (c == targetChar && nestingLevels.All(level => level == 0))
                 {
                     return i;
                 }
             }
-            
+
             return -1;
         }
 
@@ -1352,7 +1355,7 @@ namespace Spoomples.Extensions.WildcardImporter
         {
             bool hasVariants = true;
             string result = input;
-            
+
             // Keep processing until no more variants are found
             while (hasVariants)
             {
@@ -1364,7 +1367,7 @@ namespace Spoomples.Extensions.WildcardImporter
                     result = processed;
                 }
             }
-            
+
             return result;
         }
 
@@ -1379,22 +1382,22 @@ namespace Spoomples.Extensions.WildcardImporter
             int openBraceIndex = input.IndexOf('{');
             if (openBraceIndex == -1)
                 return (false, input);
-            
+
             // Find the matching closing brace
             int closeBraceIndex = FindMatchingClosingBrace(input, openBraceIndex);
             if (closeBraceIndex == -1)
                 return (false, input);
-            
+
             // Extract the content inside the braces
             string fullMatch = input.Substring(openBraceIndex, closeBraceIndex - openBraceIndex + 1);
             string content = input.Substring(openBraceIndex + 1, closeBraceIndex - openBraceIndex - 1);
-            
+
             // Process the content
             string replacement = ProcessVariantContent(content, fullMatch, task);
-            
+
             // Replace the variant in the original string
             string result = input.Substring(0, openBraceIndex) + replacement + input.Substring(closeBraceIndex + 1);
-            
+
             return (true, result);
         }
 
@@ -1442,16 +1445,16 @@ namespace Spoomples.Extensions.WildcardImporter
             // Optional prefix flags: ~ @ r o (can appear in any combination)
             // Optional numeric quantifier: can be empty for prefix-only variants like {ro$$a|b|c}
             var match = System.Text.RegularExpressions.Regex.Match(content, @"^(?<prefixFlags>[~@ro]*)(?<numberPart>(?:\d+-\d+|-\d+|\d+-|\d+)?)\$\$(?<remainingPart>.*)$");
-            
+
             Logs.Debug($"WildcardProcessor: Regex match success={match.Success}");
-            
+
             if (match.Success)
             {
                 string quantifierSpec = "";
                 string prefixFlags = match.Groups["prefixFlags"].Value; // Optional prefix flags (~, @, r, o) - parsed but ignored
                 string numberPart = match.Groups["numberPart"].Value;
                 string remainingPart = match.Groups["remainingPart"].Value;
-                
+
                 // Log debug info about prefix flags if present
                 if (!string.IsNullOrEmpty(prefixFlags))
                 {
@@ -1461,19 +1464,19 @@ namespace Spoomples.Extensions.WildcardImporter
                         task.AddWarning($"Variant flags '{prefixFlags}' not supported.  Ignoring.");
                     }
                 }
-                
+
                 // Check if there's a custom separator (pattern: separator$$options)
                 // But ignore $$ inside nested structures like <wildcard:...> or {...}
                 string customSeparator = "";
                 string optionsPart = remainingPart;
-                
+
                 int separatorIndex = FindCustomSeparatorIndex(remainingPart);
                 if (separatorIndex >= 0)
                 {
                     customSeparator = remainingPart.Substring(0, separatorIndex);
                     optionsPart = remainingPart.Substring(separatorIndex + 2); // Skip the $$
                 }
-                
+
                 // Handle quantifier specification
                 if (!string.IsNullOrEmpty(numberPart))
                 {
@@ -1510,7 +1513,7 @@ namespace Spoomples.Extensions.WildcardImporter
                     // No quantifier, just prefix flags: {ro$$...} - treat as simple variant
                     quantifierSpec = "";
                 }
-                
+
                 // Special case: Single wildcard with quantifier should become <wcwildcard[quantifier]:name>
                 // Example: {2$$__flavours__} should become <wcwildcard[2,]:flavours> not <random[2,]:<wcwildcard:flavours>>
                 Logs.Debug($"WildcardProcessor: Checking single wildcard for optionsPart='{optionsPart}'");
@@ -1522,7 +1525,7 @@ namespace Spoomples.Extensions.WildcardImporter
                     return result;
                 }
                 Logs.Debug($"WildcardProcessor: Not a single wildcard, proceeding with normal variant processing");
-                
+
                 return ProcessVariantOptions(optionsPart, quantifierSpec, task);
             }
             else
@@ -1543,13 +1546,13 @@ namespace Spoomples.Extensions.WildcardImporter
             var rangeParts = numberPart.Split('-');
             string lowerBound = rangeParts[0];
             string upperBound = rangeParts.Length > 1 ? rangeParts[1] : "";
-            
+
             // No lower bound case: {-2$$...}
             if (string.IsNullOrEmpty(lowerBound))
             {
                 lowerBound = "1";
             }
-            
+
             // No upper bound case: {2-$$...}
             if (string.IsNullOrEmpty(upperBound))
             {
@@ -1557,7 +1560,7 @@ namespace Spoomples.Extensions.WildcardImporter
                 int optionCount = optionsPart.Split('|').Length;
                 upperBound = optionCount.ToString();
             }
-            
+
             return $"[{lowerBound}-{upperBound},]";
         }
 
@@ -1571,16 +1574,16 @@ namespace Spoomples.Extensions.WildcardImporter
             string labelFilter = "";
             bool hasFilterSpecified = false;
             List<(string varName, string varValue)> variableOverrides = new List<(string, string)>();
-            
+
             // Parse variable overrides first (before processing anything else)
-            // Look for (var=value) or (var1=value1,var2=value2) at the end of the content
+            // Look for (var=value) at the end of the content
             // Use proper parentheses matching to handle nested parentheses in values
             if (content.EndsWith(")"))
             {
                 // Find the matching opening parenthesis by counting backwards
                 int parenCount = 0;
                 int openParenIndex = -1;
-                
+
                 for (int i = content.Length - 1; i >= 0; i--)
                 {
                     if (content[i] == ')')
@@ -1597,18 +1600,18 @@ namespace Spoomples.Extensions.WildcardImporter
                         }
                     }
                 }
-                
+
                 // Check if we found a complete parentheses pair at the end
                 if (openParenIndex != -1 && parenCount == 0)
                 {
                     wildcardPath = content.Substring(0, openParenIndex);
                     string variableString = content.Substring(openParenIndex + 1, content.Length - openParenIndex - 2);
-                    
+
                     // Parse variable assignments with proper handling of nested structures
-                    variableOverrides = ParseVariableAssignments(variableString);
+                    variableOverrides = ParseVariableAssignments(variableString, task);
                 }
             }
-            
+
             // Parse label filter second (after processing variable overrides)
             // Look for 'filter' or "filter" at the end of the remaining content
             var filterMatch = System.Text.RegularExpressions.Regex.Match(wildcardPath, @"^(.*?)(['""])([^'""]*?)\2$");
@@ -1618,7 +1621,7 @@ namespace Spoomples.Extensions.WildcardImporter
                 labelFilter = filterMatch.Groups[3].Value;
                 hasFilterSpecified = true;
             }
-            
+
             // Check if wildcard has advanced options (same syntax as variants)
             // Pattern: __@~ro2-3$$ custom separator $$wildcardpath__
             if (wildcardPath.Contains("$$"))
@@ -1626,13 +1629,13 @@ namespace Spoomples.Extensions.WildcardImporter
                 // Try to match the quantifier pattern with optional prefix flags and optional numeric value
                 // Pattern handles: [~@ro][2]$$wildcardpath or [~@ro][2]$$separator$$wildcardpath
                 var match = System.Text.RegularExpressions.Regex.Match(wildcardPath, @"^(?<prefixFlags>[~@ro]*)(?<numberPart>(?:\d+-\d+|-\d+|\d+)?)\$\$(?<remainingPart>.*)$");
-                
+
                 if (match.Success)
                 {
                     string prefixFlags = match.Groups["prefixFlags"].Value; // Optional prefix flags (~, @, r, o) - parsed but ignored
                     string numberPart = match.Groups["numberPart"].Value;
                     string remainingPart = match.Groups["remainingPart"].Value;
-                    
+
                     // Log debug info about prefix flags if present
                     if (!string.IsNullOrEmpty(prefixFlags))
                     {
@@ -1642,7 +1645,7 @@ namespace Spoomples.Extensions.WildcardImporter
                             task.AddWarning($"Wildcard flags '{prefixFlags}' not supported. Ignoring.");
                         }
                     }
-                    
+
                     // Check if there's a custom separator (pattern: separator$$wildcardpath)
                     int separatorIndex = FindCustomSeparatorIndex(remainingPart);
                     if (separatorIndex >= 0)
@@ -1654,7 +1657,7 @@ namespace Spoomples.Extensions.WildcardImporter
                     {
                         wildcardPath = remainingPart;
                     }
-                    
+
                     // Handle quantifier specification
                     if (!string.IsNullOrEmpty(numberPart))
                     {
@@ -1693,16 +1696,16 @@ namespace Spoomples.Extensions.WildcardImporter
                     }
                 }
             }
-            
+
             // Recursively process the reference to handle nested syntax like ${variable}
             string processedReference = ProcessWildcardLine(wildcardPath, taskId);
-            
+
             // Convert 0-based numeric filters to 1-based
             if (hasFilterSpecified && !string.IsNullOrEmpty(labelFilter))
             {
                 labelFilter = ConvertNumericFiltersTo1Based(labelFilter);
             }
-            
+
             // Handle filter inheritance logic (^wildcard and #wildcard)
             string finalFilter = labelFilter;
             if (hasFilterSpecified && !string.IsNullOrEmpty(labelFilter))
@@ -1719,7 +1722,7 @@ namespace Spoomples.Extensions.WildcardImporter
                     string filterContent = labelFilter.Substring(1);
                     string filterMacroName = $"wcfilter_{processedReference.Replace("/", "_")}";
                     string result = $"<wcpushmacro[{filterMacroName}]:{filterContent}>";
-                    
+
                     // Generate the wildcard without filter
                     if (processedReference.Contains('*'))
                     {
@@ -1736,15 +1739,15 @@ namespace Spoomples.Extensions.WildcardImporter
                             result += $"<wcwildcard{quantityString}:{task.Prefix + processedReference}>";
                         }
                     }
-                    
+
                     result += $"<wcpopmacro:{filterMacroName}>";
                     return result;
                 }
             }
-            
+
             // Generate the base wildcard result
             string baseResult;
-            
+
             // Check if reference contains glob patterns (* or **)
             if (processedReference.Contains('*'))
             {
@@ -1758,7 +1761,7 @@ namespace Spoomples.Extensions.WildcardImporter
                     // Generate wildcard with filter using wcpushmacro/wcpopmacro pattern
                     string filterMacroName = $"wcfilter_{processedReference.Replace("/", "_")}";
                     baseResult = $"<wcpushmacro[{filterMacroName}]:{finalFilter}>";
-                    
+
                     if (string.IsNullOrEmpty(quantityString))
                     {
                         baseResult += $"<wcwildcard:{task.Prefix + processedReference}:{finalFilter}>";
@@ -1767,7 +1770,7 @@ namespace Spoomples.Extensions.WildcardImporter
                     {
                         baseResult += $"<wcwildcard{quantityString}:{task.Prefix + processedReference}:{finalFilter}>";
                     }
-                    
+
                     baseResult += $"<wcpopmacro:{filterMacroName}>";
                 }
                 else
@@ -1783,71 +1786,74 @@ namespace Spoomples.Extensions.WildcardImporter
                     }
                 }
             }
-            
+
             // Wrap with variable overrides if any were specified
             if (variableOverrides.Count > 0)
             {
                 string result = "";
-                
+
                 // Add push variables and push macros for each variable (in order)
                 foreach (var (varName, varValue) in variableOverrides)
                 {
                     result += $"<wcpushvar[{varName}]:{varValue}><wcpushmacro[{varName}]:<var:{varName}>>";
                 }
-                
+
                 // Add the base wildcard result
                 result += baseResult;
-                
+
                 // Add pop macros for each variable (in reverse order)
                 for (int i = variableOverrides.Count - 1; i >= 0; i--)
                 {
                     result += $"<wcpopmacro:{variableOverrides[i].varName}><wcpopvar:{variableOverrides[i].varName}>";
                 }
-                
+
                 return result;
             }
-            
+
             return baseResult;
         }
-        
+
         /// <summary>
         /// Parses a single variable assignment from a string like "var=value with (nested) parens and, commas"
         /// Properly handles nested parentheses and commas within the variable value.
         /// </summary>
         /// <param name="variableString">The string containing a single variable assignment</param>
         /// <returns>List with single variable name-value pair, or empty list if parsing fails</returns>
-        private List<(string varName, string varValue)> ParseVariableAssignments(string variableString)
+        private List<(string varName, string varValue)> ParseVariableAssignments(string variableString, ProcessingTask task)
         {
             var result = new List<(string, string)>();
-            
+
             if (string.IsNullOrWhiteSpace(variableString))
                 return result;
-            
+
             // Find the first '=' character
             int equalPos = variableString.IndexOf('=');
             if (equalPos == -1 || equalPos == 0 || equalPos == variableString.Length - 1)
+            {
+                task.AddWarning($"Invalid variable assignment: {variableString}");
                 return result; // No '=' found, or '=' at start/end
-            
+            }
+
             // Extract variable name and value
             string varName = variableString.Substring(0, equalPos).Trim();
             string varValue = variableString.Substring(equalPos + 1).Trim();
-            
+
             // Validate that both name and value are non-empty
             if (!string.IsNullOrEmpty(varName) && !string.IsNullOrEmpty(varValue))
             {
                 result.Add((varName, varValue));
             }
-            
+
             return result;
         }
-        
+
         private string ProcessGlobWildcardRef(string quantityString, string reference, string taskId, string filter = "", List<(string varName, string varValue)> variableOverrides = null)
         {
             var task = _tasks[taskId];
-            
+
             // Find all matches for the glob pattern
             List<string> matchingPaths = FindMatchingPaths(reference, task.InMemoryFiles);
-            
+
             if (!matchingPaths.Any())
             {
                 task.AddWarning($"No matches found for glob pattern: {reference}");
@@ -1858,7 +1864,7 @@ namespace Spoomples.Extensions.WildcardImporter
                 }
                 return $"<wcwildcard:{task.Prefix + reference}><comment:no glob matches>";
             }
-            
+
             // Convert to a <wcrandom> tag with multiple <wcwildcard> entries
             if (matchingPaths.Count == 1)
             {
@@ -1881,12 +1887,12 @@ namespace Spoomples.Extensions.WildcardImporter
                     return $"<wcwildcard{quantityString}:{task.Prefix + path}>";
                 }
             }
-            
+
             // Build a <wcrandom> tag with all matches
             var quantitySpec = string.IsNullOrEmpty(quantityString) ? "" : quantityString;
             StringBuilder result = new StringBuilder();
             result.Append($"<wcrandom{quantitySpec}:");
-            
+
             for (int i = 0; i < matchingPaths.Count; i++)
             {
                 string path = matchingPaths[i];
@@ -1903,18 +1909,18 @@ namespace Spoomples.Extensions.WildcardImporter
                     result.Append("|");
                 }
             }
-            
+
             result.Append(">");
             return result.ToString();
         }
-        
+
         private List<string> FindMatchingPaths(string globPattern, ConcurrentDictionary<string, List<string>> inMemoryFiles)
         {
             List<string> matchingPaths = new List<string>();
-            
+
             // Check if pattern contains recursive globbing (**)
             bool isRecursive = globPattern.Contains("**");
-            
+
             foreach (var path in inMemoryFiles.Keys)
             {
                 if (IsGlobMatch(path, globPattern, isRecursive))
@@ -1922,10 +1928,10 @@ namespace Spoomples.Extensions.WildcardImporter
                     matchingPaths.Add(path);
                 }
             }
-            
+
             return matchingPaths;
         }
-        
+
         private bool IsGlobMatch(string path, string pattern, bool isRecursive)
         {
             // Convert glob pattern to regex pattern
@@ -1956,14 +1962,14 @@ namespace Spoomples.Extensions.WildcardImporter
                     regexPattern.Append(c);
                 }
             }
-            
+
             return Regex.IsMatch(path, $"^{regexPattern}$", RegexOptions.IgnoreCase);
         }
 
         private string ProcessVariantOptions(string optionsPart, string quantifierSpec, ProcessingTask task)
         {
             string[] options = optionsPart.Split('|');
-            
+
             // Handle empty options and recursively process each option
             for (int i = 0; i < options.Length; i++)
             {
@@ -1994,7 +2000,7 @@ namespace Spoomples.Extensions.WildcardImporter
             // No need to expand weighted options - wcrandom handles them directly
             return $"<wcrandom{quantifierSpec}:{string.Join("|", options)}>";
         }
-        
+
 
         /// <summary>
         /// Finds the index of a custom separator $$ that is not inside nested structures.
@@ -2005,24 +2011,24 @@ namespace Spoomples.Extensions.WildcardImporter
         {
             int braceDepth = 0;
             int angleDepth = 0;
-            
+
             for (int i = 0; i < text.Length - 1; i++)
             {
                 char c = text[i];
-                
+
                 // Track nesting depth
                 if (c == '{') braceDepth++;
                 else if (c == '}') braceDepth--;
                 else if (c == '<') angleDepth++;
                 else if (c == '>') angleDepth--;
-                
+
                 // Check for $$ only when we're not inside nested structures
                 if (c == '$' && text[i + 1] == '$' && braceDepth == 0 && angleDepth == 0)
                 {
                     return i;
                 }
             }
-            
+
             return -1; // No custom separator found
         }
 
@@ -2038,15 +2044,15 @@ namespace Spoomples.Extensions.WildcardImporter
             {
                 return false;
             }
-            
+
             string trimmed = optionsPart.Trim();
-            
+
             // Must start with <wcwildcard: and end with >
             if (!trimmed.StartsWith("<wcwildcard:") || !trimmed.EndsWith(">"))
             {
                 return false;
             }
-            
+
             // Check if there are any | separators at the top level (not inside nested structures)
             return !HasTopLevelPipeSeparators(trimmed);
         }
@@ -2060,7 +2066,7 @@ namespace Spoomples.Extensions.WildcardImporter
         {
             int braceDepth = 0;
             int angleDepth = 0;
-            
+
             foreach (char c in text)
             {
                 if (c == '{') braceDepth++;
@@ -2072,7 +2078,7 @@ namespace Spoomples.Extensions.WildcardImporter
                     return true; // Found a top-level pipe separator
                 }
             }
-            
+
             return false;
         }
 
@@ -2207,41 +2213,41 @@ namespace Spoomples.Extensions.WildcardImporter
             {
                 string varName = match.Groups[1].Value.Trim();
                 string defaultValue = match.Groups[2].Value;
-                
+
                 // Check for malformed cases (empty variable name)
                 if (string.IsNullOrWhiteSpace(varName))
                 {
                     return match.Value; // Return original malformed syntax
                 }
-                
+
                 // If default is empty, just return <macro:varname>
                 if (string.IsNullOrEmpty(defaultValue))
                 {
                     return $"<macro:{varName}>";
                 }
-                
+
                 // Process the default value recursively to handle nested syntax
                 string processedDefault = ProcessWildcardLine(defaultValue, task.Id);
-                
+
                 // Return wcmatch with condition for empty variable and else clause
                 return $"<wcmatch:<wccase[length({varName}) eq 0]:{processedDefault}><wccase:<macro:{varName}>>>";
             }, RegexOptions.IgnoreCase);
-            
+
             // Then process <ppp:echo varname> (without default) - only if not already processed
             var echoWithoutDefaultPattern = @"<ppp:echo\s+([^>\s]+?)\s*>(?!.*<ppp:/echo>)";
             line = Regex.Replace(line, echoWithoutDefaultPattern, match =>
             {
                 string varName = match.Groups[1].Value.Trim();
-                
+
                 // Check for malformed cases (empty variable name)
                 if (string.IsNullOrWhiteSpace(varName))
                 {
                     return match.Value; // Return original malformed syntax
                 }
-                
+
                 return $"<macro:{varName}>";
             }, RegexOptions.IgnoreCase);
-            
+
             return line;
         }
 
@@ -2257,35 +2263,35 @@ namespace Spoomples.Extensions.WildcardImporter
             // Use manual parsing to handle nested if statements properly
             string result = line;
             int startIndex = 0;
-            
+
             while (true)
             {
                 // Find the next if statement
                 int ifStart = result.IndexOf("<ppp:if ", startIndex, StringComparison.OrdinalIgnoreCase);
                 if (ifStart == -1)
                     break;
-                    
+
                 // Find the end of the opening tag
                 int tagEnd = result.IndexOf('>', ifStart);
                 if (tagEnd == -1)
                     break;
-                    
+
                 // Extract the condition
                 string condition = result.Substring(ifStart + 8, tagEnd - ifStart - 8).Trim();
-                
+
                 // Find the matching closing tag using manual counting
                 int contentStart = tagEnd + 1;
                 int depth = 1;
                 int pos = contentStart;
-                
+
                 while (pos < result.Length && depth > 0)
                 {
                     int nextIf = result.IndexOf("<ppp:if ", pos, StringComparison.OrdinalIgnoreCase);
                     int nextEndIf = result.IndexOf("<ppp:/if>", pos, StringComparison.OrdinalIgnoreCase);
-                    
+
                     if (nextEndIf == -1)
                         break; // Malformed - no closing tag
-                        
+
                     if (nextIf != -1 && nextIf < nextEndIf)
                     {
                         // Found nested if before closing tag
@@ -2301,7 +2307,7 @@ namespace Spoomples.Extensions.WildcardImporter
                             // This is our matching closing tag
                             string content = result.Substring(contentStart, nextEndIf - contentStart);
                             string fullMatch = result.Substring(ifStart, nextEndIf + 9 - ifStart);
-                            
+
                             try
                             {
                                 string replacement = ProcessIfStructure(condition, content, task, fullMatch);
@@ -2322,7 +2328,7 @@ namespace Spoomples.Extensions.WildcardImporter
                         }
                     }
                 }
-                
+
                 if (depth > 0)
                 {
                     // Malformed - no matching closing tag found
@@ -2330,7 +2336,7 @@ namespace Spoomples.Extensions.WildcardImporter
                     break;
                 }
             }
-            
+
             return result;
         }
 
@@ -2340,10 +2346,10 @@ namespace Spoomples.Extensions.WildcardImporter
         private string ProcessIfStructure(string initialCondition, string content, ProcessingTask task, string originalMatch)
         {
             var cases = new List<string>();
-            
+
             // Parse the content to extract elif and else clauses
             var parts = ParseIfContent(content);
-            
+
             // Add the initial if condition
             string processedCondition = ProcessCondition(initialCondition, task);
             if (processedCondition == null)
@@ -2351,7 +2357,7 @@ namespace Spoomples.Extensions.WildcardImporter
                 // Return original text if condition parsing failed
                 return originalMatch;
             }
-            
+
             string processedContent = parts.IfContent;
             if (string.IsNullOrEmpty(processedContent))
             {
@@ -2362,9 +2368,9 @@ namespace Spoomples.Extensions.WildcardImporter
                 // Recursively process content to handle nested structures
                 processedContent = ProcessWildcardLine(processedContent, task.Id);
             }
-            
+
             cases.Add($"<wccase[{processedCondition}]:{processedContent}>");
-            
+
             // Add elif clauses
             foreach (var elifPart in parts.ElifParts)
             {
@@ -2375,14 +2381,14 @@ namespace Spoomples.Extensions.WildcardImporter
                     cases.Add($"<wccase[{elifCondition}]:{elifContent}>");
                 }
             }
-            
+
             // Add else clause if present
             if (parts.ElseContent != null)
             {
                 string elseContent = string.IsNullOrEmpty(parts.ElseContent) ? "<comment:empty>" : ProcessWildcardLine(parts.ElseContent, task.Id);
                 cases.Add($"<wccase:{elseContent}>");
             }
-            
+
             return $"<wcmatch:{string.Join("", cases)}>";
         }
 
@@ -2393,55 +2399,55 @@ namespace Spoomples.Extensions.WildcardImporter
         {
             var result = new IfParts();
             var elifParts = new List<ElifPart>();
-            
+
             // Find elif and else tags
             var elifPattern = @"<ppp:elif\s+([^>]+?)>";
             var elsePattern = @"<ppp:else>";
-            
+
             var elifMatches = Regex.Matches(content, elifPattern, RegexOptions.IgnoreCase);
             var elseMatch = Regex.Match(content, elsePattern, RegexOptions.IgnoreCase);
-            
+
             int currentIndex = 0;
-            
+
             // Extract content before first elif or else
             int nextIndex = content.Length;
             if (elifMatches.Count > 0)
                 nextIndex = Math.Min(nextIndex, elifMatches[0].Index);
             if (elseMatch.Success)
                 nextIndex = Math.Min(nextIndex, elseMatch.Index);
-                
+
             result.IfContent = content.Substring(currentIndex, nextIndex - currentIndex);
             currentIndex = nextIndex;
-            
+
             // Process elif clauses
             for (int i = 0; i < elifMatches.Count; i++)
             {
                 var elifMatch = elifMatches[i];
                 string condition = elifMatch.Groups[1].Value.Trim();
-                
+
                 // Find start of content (after the elif tag)
                 int contentStart = elifMatch.Index + elifMatch.Length;
-                
+
                 // Find end of content (before next elif or else)
                 int contentEnd = content.Length;
                 if (i + 1 < elifMatches.Count)
                     contentEnd = Math.Min(contentEnd, elifMatches[i + 1].Index);
                 if (elseMatch.Success)
                     contentEnd = Math.Min(contentEnd, elseMatch.Index);
-                
+
                 string elifContent = content.Substring(contentStart, contentEnd - contentStart);
                 elifParts.Add(new ElifPart { Condition = condition, Content = elifContent });
             }
-            
+
             result.ElifParts = elifParts;
-            
+
             // Process else clause
             if (elseMatch.Success)
             {
                 int elseStart = elseMatch.Index + elseMatch.Length;
                 result.ElseContent = content.Substring(elseStart);
             }
-            
+
             return result;
         }
 
@@ -2451,10 +2457,10 @@ namespace Spoomples.Extensions.WildcardImporter
         private string ProcessCondition(string condition, ProcessingTask task)
         {
             condition = condition.Trim();
-            
+
             if (string.IsNullOrWhiteSpace(condition))
                 return null;
-            
+
             // replace some operators
             condition = condition
                 .Replace(" not eq ", " ne ")
@@ -2463,7 +2469,7 @@ namespace Spoomples.Extensions.WildcardImporter
                 .Replace(" not lt ", " ge ")
                 .Replace(" not ge ", " lt ")
                 .Replace(" not le ", " gt ");
-            
+
             // Look for phrases of the form "someVar [not] in|contains someExpressionThatEndsOnSpaceButCountNestedParensAndQuotes"
             var re = new Regex(@"\b(?<var>[\w\-]+)\s+(?<not>not\s+)?(?<op>in|contains)\s+");
             Match match = null;
@@ -2517,13 +2523,13 @@ namespace Spoomples.Extensions.WildcardImporter
         /// </summary>
         private string ConvertOperationToWcaseExpression(string variable, string operation, string value, bool isNot, ProcessingTask task)
         {
-            
+
             // Check if value is a list (parentheses)
             if (value.StartsWith("(") && value.EndsWith(")"))
             {
                 string listContent = value.Substring(1, value.Length - 2);
                 var values = ParseValueList(listContent);
-                
+
                 if (values.Count == 1)
                 {
                     // Single value in parentheses, treat as single value
@@ -2577,7 +2583,7 @@ namespace Spoomples.Extensions.WildcardImporter
         private string ConvertListOperation(string variable, string operation, List<string> values, bool isNot)
         {
             var expressions = new List<string>();
-            
+
             foreach (string value in values)
             {
                 switch (operation.ToLowerInvariant())
@@ -2592,7 +2598,7 @@ namespace Spoomples.Extensions.WildcardImporter
                         throw new InvalidOperationException($"Operation '{operation}' not supported with lists");
                 }
             }
-            
+
             string joinOperator;
             if (isNot)
             {
@@ -2626,11 +2632,11 @@ namespace Spoomples.Extensions.WildcardImporter
             var currentValue = new StringBuilder();
             bool inQuotes = false;
             char quoteChar = '"';
-            
+
             for (int i = 0; i < listContent.Length; i++)
             {
                 char c = listContent[i];
-                
+
                 if (!inQuotes && (c == '"' || c == '\''))
                 {
                     inQuotes = true;
@@ -2652,13 +2658,13 @@ namespace Spoomples.Extensions.WildcardImporter
                     currentValue.Append(c);
                 }
             }
-            
+
             // Add the last value
             if (currentValue.Length > 0)
             {
                 values.Add(currentValue.ToString().Trim());
             }
-            
+
             return values;
         }
 
@@ -2693,25 +2699,25 @@ namespace Spoomples.Extensions.WildcardImporter
         private string ProcessStnCommands(string line, ProcessingTask task)
         {
             string result = line;
-            
+
             // First, handle insertion point markers (iN) - remove them with warnings
             result = ProcessStnInsertionMarkers(result, task);
-            
+
             // Then process STN commands with manual parsing to handle nested structures
             int startIndex = 0;
-            
+
             while (true)
             {
                 // Find the next STN command
                 int stnStart = result.IndexOf("<ppp:stn", startIndex, StringComparison.OrdinalIgnoreCase);
                 if (stnStart == -1)
                     break;
-                    
+
                 // Find the end of the opening tag
                 int tagEnd = result.IndexOf('>', stnStart);
                 if (tagEnd == -1)
                     break;
-                    
+
                 // Extract the position argument (if any)
                 string positionArg = "";
                 int spaceIndex = result.IndexOf(' ', stnStart);
@@ -2719,20 +2725,20 @@ namespace Spoomples.Extensions.WildcardImporter
                 {
                     positionArg = result.Substring(spaceIndex + 1, tagEnd - spaceIndex - 1).Trim();
                 }
-                
+
                 // Find the matching closing tag using manual counting
                 int contentStart = tagEnd + 1;
                 int depth = 1;
                 int pos = contentStart;
-                
+
                 while (pos < result.Length && depth > 0)
                 {
                     int nextStn = result.IndexOf("<ppp:stn", pos, StringComparison.OrdinalIgnoreCase);
                     int nextEndStn = result.IndexOf("<ppp:/stn>", pos, StringComparison.OrdinalIgnoreCase);
-                    
+
                     if (nextEndStn == -1)
                         break; // Malformed - no closing tag
-                        
+
                     if (nextStn != -1 && nextStn < nextEndStn)
                     {
                         // Found nested STN before closing tag
@@ -2748,7 +2754,7 @@ namespace Spoomples.Extensions.WildcardImporter
                             // This is our matching closing tag
                             string content = result.Substring(contentStart, nextEndStn - contentStart);
                             string fullMatch = result.Substring(stnStart, nextEndStn + 10 - stnStart);
-                            
+
                             try
                             {
                                 string replacement = ProcessStnStructure(positionArg, content, task);
@@ -2769,7 +2775,7 @@ namespace Spoomples.Extensions.WildcardImporter
                         }
                     }
                 }
-                
+
                 if (depth > 0)
                 {
                     // Malformed - no matching closing tag found
@@ -2777,7 +2783,7 @@ namespace Spoomples.Extensions.WildcardImporter
                     break;
                 }
             }
-            
+
             return result;
         }
 
@@ -2788,7 +2794,7 @@ namespace Spoomples.Extensions.WildcardImporter
         {
             // Pattern to match insertion point markers like <ppp:stn i0>, <ppp:stn i1>, etc.
             var regex = new Regex(@"<ppp:stn\s+i\d+\s*>", RegexOptions.IgnoreCase);
-            
+
             return regex.Replace(line, match =>
             {
                 task.AddWarning($"STN insertion point marker '{match.Value}' is not supported and has been removed");
@@ -2803,15 +2809,15 @@ namespace Spoomples.Extensions.WildcardImporter
         {
             // Recursively process the content to handle nested commands
             string processedContent = ProcessWildcardLine(content, task.Id);
-            
+
             // Determine the position mode and separator
             bool isPrepend = true; // Default is start (prepend)
             string separator = ", "; // Default separator for prepend (suffix)
-            
+
             if (!string.IsNullOrEmpty(positionArg))
             {
                 string pos = positionArg.ToLowerInvariant();
-                
+
                 if (pos == "e" || pos == "end")
                 {
                     // End position - use append mode
@@ -2839,7 +2845,7 @@ namespace Spoomples.Extensions.WildcardImporter
                     separator = ", ";
                 }
             }
-            
+
             // Build the wcnegative directive
             if (isPrepend)
             {
@@ -2854,7 +2860,7 @@ namespace Spoomples.Extensions.WildcardImporter
         }
 
         #endregion
-        
+
         /// <summary>
         /// Converts 0-based numeric filters to 1-based by incrementing any numeric values found in the filter string.
         /// For example, "1,special" becomes "2,special" and "0,primary,3" becomes "1,primary,4".
@@ -2863,7 +2869,7 @@ namespace Spoomples.Extensions.WildcardImporter
         {
             if (string.IsNullOrEmpty(filter))
                 return filter;
-                
+
             // Use regex to find all numeric values and increment them by 1
             return System.Text.RegularExpressions.Regex.Replace(filter, @"\b\d+\b", match =>
             {
@@ -2941,9 +2947,9 @@ namespace Spoomples.Extensions.WildcardImporter
     /// <summary>Represents file data sent from the frontend. Can be a file path or a base64 encoded file. This is represented as a file path if the Base64Content is null, and as a base64 encoded file otherwise.</summary>
     public class FileData
     {
-        #pragma warning disable CS8632 // Nullable reference annotations used without nullable context
+#pragma warning disable CS8632 // Nullable reference annotations used without nullable context
         public string FilePath;
         public string? Base64Content;
-        #pragma warning restore CS8632 // Nullable reference annotations used without nullable context
+#pragma warning restore CS8632 // Nullable reference annotations used without nullable context
     }
 }
