@@ -1297,6 +1297,7 @@ namespace Spoomples.Extensions.WildcardImporter
         /// <param name="targetChar">The character to find.</param>
         /// <param name="openChars">Array of opening bracket characters to track nesting.</param>
         /// <param name="closeChars">Array of closing bracket characters to track nesting.</param>
+        /// <param name="handleQuotes">Whether to handle quotes.</param>
         /// <returns>The index of the target character at top level, or -1 if not found.</returns>
         private int FindTopLevelChar(string input, int startIndex, char targetChar, char[] openChars, char[] closeChars, bool handleQuotes = false)
         {
@@ -1310,7 +1311,7 @@ namespace Spoomples.Extensions.WildcardImporter
                     continue;
 
                 char c = input[i];
-                if (handleQuotes && (c == '"' || c == '\''))
+                if (handleQuotes && (c == '"'/* || c == '\'*/))
                 {
                     if (quote == ' ')
                     {
@@ -1839,7 +1840,7 @@ namespace Spoomples.Extensions.WildcardImporter
             string varValue = variableString.Substring(equalPos + 1).Trim();
 
             // Validate that both name and value are non-empty
-            if (!string.IsNullOrEmpty(varName) && !string.IsNullOrEmpty(varValue))
+            if (!string.IsNullOrEmpty(varName))
             {
                 result.Add((varName, varValue));
             }
