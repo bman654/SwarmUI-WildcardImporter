@@ -9,16 +9,16 @@ namespace Spoomples.Extensions.WildcardImporter
     public static partial class PromptDirectives
     {
         // get a new MagesEngine for each Variables dictionary we see.  This effectively gives us a new engine for each prompt we process
-        public static ConditionalWeakTable<T2IPromptHandling.PromptTagContext, MagesEngine> EngineCache = new ();
-        
+        public static ConditionalWeakTable<T2IPromptHandling.PromptTagContext, MagesEngine> EngineCache = new();
+
         public static readonly string MatchState_None = "none";
         public static readonly string MatchState_Open = "open";
         public static readonly string MatchState_Closed = "closed";
-        public static ConditionalWeakTable<T2IPromptHandling.PromptTagContext, string> CurrentMatchState = new ();
+        public static ConditionalWeakTable<T2IPromptHandling.PromptTagContext, string> CurrentMatchState = new();
         public static ConditionalWeakTable<Dictionary<string, string>, Dictionary<string, Stack<string>>> VariableStack = new();
         public static ConditionalWeakTable<Dictionary<string, string>, Dictionary<string, Stack<string>>> MacroStack = new();
-        
-        public static ThreadLocal<string> CurrentMatchLength = new (() => "");
+
+        public static ThreadLocal<string> CurrentMatchLength = new(() => "");
 
         // Static helper methods for Mages function registration
         public static bool ContainsHelper(string str, string sub) => str.Contains(sub);
@@ -59,16 +59,16 @@ namespace Spoomples.Extensions.WildcardImporter
             {
                 var scope = new PromptTagContextDictionary(context);
                 var engine = new MagesEngine(scope);
-                
+
                 Func<string, string, bool> contains = ContainsHelper;
                 Func<string, string, bool> icontains = IContainsHelper;
-                
+
                 engine.SetFunction("contains", contains);
                 engine.SetFunction("icontains", icontains);
                 return engine;
             });
         }
-        
+
         public static void RegisterPromptDirectives()
         {
             AddNegativePrompt();
@@ -108,7 +108,7 @@ namespace Spoomples.Extensions.WildcardImporter
 
         [GeneratedRegex(@"\bif\s+(?<expr>.*)$")]
         public static partial Regex IfConditionRE();
-        
+
         [GeneratedRegex(@"\((?<labels>[^)]*)\)")]
         public static partial Regex LabelsRE();
 
@@ -125,11 +125,11 @@ namespace Spoomples.Extensions.WildcardImporter
                 {
                     var (rawOpts, value) = rawString.BeforeAndAfter("::");
                     Value = value;
-                    
+
                     // parse the options, which looks like:
                     // 13 (label1,label2,label3) if x eq "42"
                     // each component is optional.
-                    
+
                     // Lets first see if there is an if condition expression by searching for "\bif "
                     var opts = rawOpts.Trim();
                     var match = IfConditionRE().Match(opts);
@@ -138,7 +138,7 @@ namespace Spoomples.Extensions.WildcardImporter
                         ConditionExpression = match.Groups["expr"].Value;
                         opts = opts.Substring(0, match.Index).Trim();
                     }
-                    
+
                     // Now lets look for a labels section
                     match = LabelsRE().Match(opts);
                     if (match.Success)
@@ -150,7 +150,7 @@ namespace Spoomples.Extensions.WildcardImporter
                         }
                         opts = opts.Remove(match.Index, match.Length).Trim();
                     }
-                    
+
                     // Now look for a weight
                     if (opts != "")
                     {
@@ -160,12 +160,12 @@ namespace Spoomples.Extensions.WildcardImporter
                         }
                         else
                         {
-                            Logs.Warning($"Random choice options section is malformed: '{rawOpts}'");
+                            Logs.Warning($"Random choice options section is malformed: '{rawString}'");
                         }
                     }
                 }
             }
-            
+
             public bool IsConditionTrue(T2IPromptHandling.PromptTagContext context)
             {
                 if (ConditionExpression is null)
@@ -196,7 +196,7 @@ namespace Spoomples.Extensions.WildcardImporter
                 // label2+label3
                 // !label4
                 // label5+!label2
-                
+
                 // try to parse it as an integer
                 if (int.TryParse(rawString, out int position))
                 {
@@ -204,7 +204,7 @@ namespace Spoomples.Extensions.WildcardImporter
                     Position = position - 1;
                     return;
                 }
-                
+
                 // try to parse it as a +-separated
                 foreach (var rawLabel in rawString.SplitFast('+'))
                 {
@@ -234,7 +234,7 @@ namespace Spoomples.Extensions.WildcardImporter
                 {
                     return Position == position;
                 }
-                
+
                 if (!(PositiveLabels?.All(label => choice.Labels.Contains(label)) ?? true))
                 {
                     return false;
@@ -243,7 +243,7 @@ namespace Spoomples.Extensions.WildcardImporter
                 {
                     return false;
                 }
-                
+
                 return true;
             }
         }
@@ -274,7 +274,7 @@ namespace Spoomples.Extensions.WildcardImporter
         record RandomChoicesSet(List<RandomChoice> Choices)
         {
             public double TotalWeight { get; set; }
-            
+
             public RandomChoicesSet(string[] rawVals, T2IPromptHandling.PromptTagContext context, ChoiceLabelFilter filter, HashSet<string> exclude = null) : this(new List<RandomChoice>(rawVals.Length))
             {
                 TotalWeight = 0;
@@ -338,9 +338,9 @@ namespace Spoomples.Extensions.WildcardImporter
                 {
                     return result;
                 }
-                
-                var origSet = set with { Choices = [..set.Choices] };
-               
+
+                var origSet = set with { Choices = [.. set.Choices] };
+
                 for (int i = 0; i < count; i++)
                 {
                     string choice = set.TakeRandom(context);
@@ -406,7 +406,7 @@ namespace Spoomples.Extensions.WildcardImporter
                     context.TrackWarning($"A variable name is required when using wcpushvar.");
                     return null;
                 }
-                
+
                 var dict = VariableStack.GetValue(context.Variables, _ => new Dictionary<string, Stack<string>>());
                 var stack = dict.GetOrCreate(name, () => new Stack<string>());
                 stack.Push(context.Variables.GetValueOrDefault(name, ""));
@@ -499,7 +499,7 @@ namespace Spoomples.Extensions.WildcardImporter
                     context.TrackWarning($"A variable name is required when using wcaddvar.");
                     return null;
                 }
-                
+
                 data = context.Parse(data);
                 var currentValue = context.Variables.GetValueOrDefault(name, "");
                 context.Variables[name] = mode?.ToLowerFast() == "prepend" ? $"{data}{currentValue}" : $"{currentValue}{data}";
@@ -579,8 +579,9 @@ namespace Spoomples.Extensions.WildcardImporter
                     return null;
                 }
             };
-            
-            T2IPromptHandling.PromptTagLengthEstimators["wccase"] = (data, context) => {
+
+            T2IPromptHandling.PromptTagLengthEstimators["wccase"] = (data, context) =>
+            {
                 var lengthOfThisCase = T2IPromptHandling.ProcessPromptLikeForLength(data);
                 var currentMatchLength = CurrentMatchLength.Value;
                 if (lengthOfThisCase.Length > currentMatchLength.Length)
@@ -629,8 +630,8 @@ namespace Spoomples.Extensions.WildcardImporter
                 {
                     return "";
                 }
-                
-                var origSet = set with { Choices = [..set.Choices] };
+
+                var origSet = set with { Choices = [.. set.Choices] };
                 string result = "";
                 for (int i = 0; i < count; i++)
                 {
