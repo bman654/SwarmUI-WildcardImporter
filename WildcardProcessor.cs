@@ -2333,7 +2333,7 @@ namespace Spoomples.Extensions.WildcardImporter
                 if (depth > 0)
                 {
                     // Malformed - no matching closing tag found
-                    task.AddWarning("Malformed if command: no matching closing tag");
+                    task.AddWarning($"Malformed if command: no matching closing tag: {result.Substring(ifStart)}");
                     break;
                 }
             }
@@ -2347,6 +2347,9 @@ namespace Spoomples.Extensions.WildcardImporter
         private string ProcessIfStructure(string initialCondition, string content, ProcessingTask task, string originalMatch)
         {
             var cases = new List<string>();
+
+            // first process any nested constructs (this will skip top-level elif/else clauses)
+            content = ProcessWildcardLine(content, task.Id);
 
             // Parse the content to extract elif and else clauses
             var parts = ParseIfContent(content);
@@ -2364,11 +2367,6 @@ namespace Spoomples.Extensions.WildcardImporter
             {
                 processedContent = "<comment:empty>";
             }
-            else
-            {
-                // Recursively process content to handle nested structures
-                processedContent = ProcessWildcardLine(processedContent, task.Id);
-            }
 
             cases.Add($"<wccase[{processedCondition}]:{processedContent}>");
 
@@ -2378,7 +2376,7 @@ namespace Spoomples.Extensions.WildcardImporter
                 string elifCondition = ProcessCondition(elifPart.Condition, task);
                 if (elifCondition != null)
                 {
-                    string elifContent = string.IsNullOrEmpty(elifPart.Content) ? "<comment:empty>" : ProcessWildcardLine(elifPart.Content, task.Id);
+                    string elifContent = string.IsNullOrEmpty(elifPart.Content) ? "<comment:empty>" : elifPart.Content;
                     cases.Add($"<wccase[{elifCondition}]:{elifContent}>");
                 }
             }
@@ -2386,7 +2384,7 @@ namespace Spoomples.Extensions.WildcardImporter
             // Add else clause if present
             if (parts.ElseContent != null)
             {
-                string elseContent = string.IsNullOrEmpty(parts.ElseContent) ? "<comment:empty>" : ProcessWildcardLine(parts.ElseContent, task.Id);
+                string elseContent = string.IsNullOrEmpty(parts.ElseContent) ? "<comment:empty>" : parts.ElseContent;
                 cases.Add($"<wccase:{elseContent}>");
             }
 
