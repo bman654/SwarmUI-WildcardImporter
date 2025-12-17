@@ -597,6 +597,7 @@ namespace Spoomples.Extensions.WildcardImporter
         {
             T2IPromptHandling.PromptTagProcessors["wcwildcard"] = (data, context) =>
             {
+                var origData = data;
                 data = context.Parse(data);
                 (data, var labelFilter) = data.BeforeAndAfter(':');
                 var choiceLabelFilter = new ChoiceLabelFilter(labelFilter);
@@ -620,7 +621,7 @@ namespace Spoomples.Extensions.WildcardImporter
                 }
                 if (data.Length < card.Length)
                 {
-                    Logs.Warning($"Wildcard input '{data}' is not a valid wildcard name, but appears to match '{card}', will use that instead.");
+                    context.TrackWarning($"Wildcard input '{data}' is not a valid wildcard name, but appears to match '{card}', will use that instead.");
                 }
                 WildcardsHelper.Wildcard wildcard = WildcardsHelper.GetWildcard(card);
                 List<string> usedWildcards = context.Input.ExtraMeta.GetOrCreate("used_wildcards", () => new List<string>()) as List<string>;

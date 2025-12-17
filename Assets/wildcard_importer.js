@@ -829,7 +829,7 @@ promptTabComplete.registerPrefix('wcmatch', 'Provides conditional logic for prom
     ];
 });
 
-promptTabComplete.registerPrefix('wccase[var_name == "value"]', 'Conditional case block used within <wcmatch>', (prefix) => {
+promptTabComplete.registerPrefix('wccase[var_name eq "value"]', 'Conditional case block used within <wcmatch>', (prefix) => {
     return [
         '\nMust be used inside a <wcmatch> block.',
         '\nWith condition: "<wccase[condition]:content if condition is true>"',

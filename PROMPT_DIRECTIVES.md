@@ -295,7 +295,7 @@ A `<wccase>` block with no condition will be treated as the default case and wil
 ```
 
 **Condition Expression Support:**
-- Variable comparisons: `myvar == "value"`
+- Variable comparisons: `myvar eq "value"`
 - Logical operators: `and` , `or`
 - Grouping: `(` and `)`
 - String contains functions
@@ -321,8 +321,8 @@ A `<wccase>` block with no condition will be treated as the default case and wil
 ```
 <setvar[mood,false]:<random:happy|sad|angry>>
 <wcmatch:
-  <wccase[mood == "happy"]:smiling, cheerful>
-  <wccase[mood == "sad"]:crying, melancholy>
+  <wccase[mood eq "happy"]:smiling, cheerful>
+  <wccase[mood eq "sad"]:crying, melancholy>
   <wccase:neutral expression>
 >
 ```
@@ -332,8 +332,8 @@ A `<wccase>` block with no condition will be treated as the default case and wil
 <setvar[style,false]:<random:realistic|anime|cartoon>>
 <setvar[gender,false]:<random:male|female>>
 <wcmatch:
-  <wccase[style == "anime" and gender == "female"]:kawaii, moe, detailed anime girl>
-  <wccase[contains(style, "real") and gender == "male"]:photorealistic man, detailed>
+  <wccase[style eq "anime" and gender eq "female"]:kawaii, moe, detailed anime girl>
+  <wccase[contains(style, "real") and gender eq "male"]:photorealistic man, detailed>
   <wccase[icontains(style, "CARTOON")]:colorful cartoon character>
   <wccase:default artistic style>
 >
@@ -345,8 +345,8 @@ A `<wccase>` block with no condition will be treated as the default case and wil
    ```
    <setvar[character,false]:<wcrandom:warrior|mage|rogue>>
    <wcmatch:
-     <wccase[character == "warrior"]:heavy armor, sword<wcnegative:, magic>>
-     <wccase[character == "mage"]:robes, staff<wcnegative:, physical weapons>>
+     <wccase[character eq "warrior"]:heavy armor, sword<wcnegative:, magic>>
+     <wccase[character eq "mage"]:robes, staff<wcnegative:, physical weapons>>
      <wccase:leather armor, dagger>
    >
    ```
@@ -355,8 +355,8 @@ A `<wccase>` block with no condition will be treated as the default case and wil
    ```
    <setvar[lighting,false]:<random:bright|dark|neon>>
    <wcmatch:
-     <wccase[lighting == "dark"]:moody atmosphere<wcnegative:, bright, overexposed>>
-     <wccase[lighting == "neon"]:cyberpunk vibes<wcnegative:, natural lighting>>
+     <wccase[lighting eq "dark"]:moody atmosphere<wcnegative:, bright, overexposed>>
+     <wccase[lighting eq "neon"]:cyberpunk vibes<wcnegative:, natural lighting>>
      <wccase:natural lighting<wcnegative:, artificial, neon>>
    >
    ```
