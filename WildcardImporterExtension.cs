@@ -1,5 +1,7 @@
 using SwarmUI.Core;
 using SwarmUI.Utils;
+using System.IO;
+using System.Reflection;
 
 namespace Spoomples.Extensions.WildcardImporter
 {
@@ -33,17 +35,31 @@ namespace Spoomples.Extensions.WildcardImporter
 
         public override void OnInit()
         {
-            var yamlParser = new YamlParser(this.FilePath);
+            // Ensure dependencies adjacent to the extension assembly can be loaded
+            AppDomain.CurrentDomain.AssemblyResolve += (s, e) =>
+            {
+                if (e.Name.StartsWith("YamlDotNet,") || e.Name.StartsWith("Mages.Core,"))
+                {
+                    string folder = Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location);
+                    string dllName = e.Name.Split(',')[0] + ".dll";
+                    string path = Path.Combine(folder, dllName);
+                    if (File.Exists(path))
+                    {
+                        return System.Reflection.Assembly.LoadFile(path);
+                    }
+                }
+                return null;
+            };
+
+            var yamlParser = new YamlParser();
             var processor = new WildcardProcessor(yamlParser);
             _api = new WildcardImporterAPI(processor);
             _api.Register();
 
-            // Initialize MagesHelper with extension folder path
-            MagesEngine.Init(this.FilePath);
             PromptDirectives.RegisterPromptDirectives();
 
             AddT2IParameters();
-            
+
             Detailer.Register(FilePath);
         }
 
@@ -65,7 +81,7 @@ namespace Spoomples.Extensions.WildcardImporter
                 OrderPriority: 1
             ));
 
-            T2IParamInput.LateSpecialParameterHandlers.Add(userInput => 
+            T2IParamInput.LateSpecialParameterHandlers.Add(userInput =>
                 {
                     // if PromptCleanup is true, run the pos and neg prompts through Clean
                     if (userInput.InternalSet.Get(PromptCleanup))
@@ -189,7 +205,7 @@ namespace Spoomples.Extensions.WildcardImporter
 
                     // Find the end of the tag, handling nested tags
                     var tagInfo = FindCompleteTag(prompt, i);
-                    
+
                     if (tagInfo.IsComplete)
                     {
                         segments.Add(new PromptSegment(tagInfo.Content, true));
@@ -271,7 +287,7 @@ namespace Spoomples.Extensions.WildcardImporter
         {
             // replace newlines with spaces
             textSegment = textSegment.Replace("\n", " ");
-            
+
             // Ensure every "," or ")" has a space after it
             textSegment = System.Text.RegularExpressions.Regex.Replace(textSegment, @"([,)])(?!\s)", "$1 ");
 
@@ -280,13 +296,13 @@ namespace Spoomples.Extensions.WildcardImporter
 
             // Replace 2+ ", " with single ", "
             textSegment = System.Text.RegularExpressions.Regex.Replace(textSegment, @"(\s*,\s*)+", ", ");
-            
+
             // Remove leading and trailing ", " and " "
             textSegment = textSegment.Trim(' ', ',');
 
             return textSegment;
         }
-        
+
         /// <summary>
         /// Processes a prompt by automatically breaking up text segments that exceed 75 tokens.
         /// Uses async token counting for better performance.
@@ -339,10 +355,10 @@ namespace Spoomples.Extensions.WildcardImporter
                     {
                         // Extract the content inside brackets
                         string bracketContent = text.Substring(i + 1, bracketEnd - i - 1);
-                        
+
                         // Split on unescaped | and find the longest option
                         string longestOption = GetLongestOptionFromBracketContent(bracketContent);
-                        
+
                         result.Append(longestOption);
                         i = bracketEnd + 1;
                     }
@@ -393,12 +409,12 @@ namespace Spoomples.Extensions.WildcardImporter
             var options = new List<string>();
             var currentOption = new System.Text.StringBuilder();
             char separator = '\0'; // Track which separator we're using
-            
+
             // First pass: determine separator and split options
             for (int i = 0; i < bracketContent.Length; i++)
             {
                 char ch = bracketContent[i];
-                
+
                 if ((ch == '|' || ch == ':') && !IsEscaped(bracketContent, i))
                 {
                     // Set separator on first encounter
@@ -406,7 +422,7 @@ namespace Spoomples.Extensions.WildcardImporter
                     {
                         separator = ch;
                     }
-                    
+
                     // Only split if this matches our established separator
                     if (ch == separator)
                     {
@@ -503,7 +519,7 @@ namespace Spoomples.Extensions.WildcardImporter
                 }
 
                 segments.Add(splitPart.TrimEnd(' ', ','));
-                
+
                 // Remove the split part from remaining text and clean up
                 remainingText = remainingText.Substring(splitPart.Length).TrimStart(' ', ',');
             }
@@ -528,13 +544,13 @@ namespace Spoomples.Extensions.WildcardImporter
             // We'll search from the end down to a reasonable minimum (10 tokens worth)
             int startPos = text.Length - 1;
             int minPos = 40; // ~10 tokens worth of characters - reasonable minimum
-            
+
             string fallbackSpaceSplit = null; // Remember the best space split we find
-            
+
             for (int pos = startPos; pos > minPos; pos--)
             {
                 char ch = text[pos];
-                
+
                 // Check for comma - split AFTER comma (highest priority)
                 if (ch == ',' && !IsEscaped(text, pos) && !IsInsideBracketPattern(text, pos))
                 {
@@ -544,7 +560,7 @@ namespace Spoomples.Extensions.WildcardImporter
                         return splitText; // Immediately return - comma has highest priority
                     }
                 }
-                
+
                 // Check for closing parenthesis - split AFTER ')' (high priority)
                 if (ch == ')' && !IsEscaped(text, pos) && !IsInsideBracketPattern(text, pos))
                 {
@@ -554,7 +570,7 @@ namespace Spoomples.Extensions.WildcardImporter
                         return splitText; // Immediately return - parenthesis has high priority
                     }
                 }
-                
+
                 // Check for opening parenthesis - split BEFORE '(' (high priority)
                 if (ch == '(' && !IsEscaped(text, pos) && !IsInsideBracketPattern(text, pos))
                 {
@@ -564,7 +580,7 @@ namespace Spoomples.Extensions.WildcardImporter
                         return splitText; // Immediately return - parenthesis has high priority
                     }
                 }
-                
+
                 // Check for whitespace - remember as fallback but keep searching for punctuation
                 if (ch == ' ' && fallbackSpaceSplit == null && !IsInsideBracketPattern(text, pos))
                 {

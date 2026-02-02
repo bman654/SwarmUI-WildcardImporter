@@ -23,9 +23,9 @@ namespace Spoomples.Extensions.WildcardImporter
             // Set logging level to Debug to see detailed execution traces
             var originalLogLevel = Logs.MinimumLevel;
             Logs.MinimumLevel = Logs.LogLevel.Debug;
-            
+
             Logs.Info("Starting WildcardProcessor unit tests...");
-            
+
             _testsPassed = 0;
             _testsFailed = 0;
             _failureMessages.Clear();
@@ -46,10 +46,10 @@ namespace Spoomples.Extensions.WildcardImporter
             TestGlobWildcards();
             TestAdvancedWildcardOptions();
             TestVariableOverrides();
-            
+
             // Test label filtering
             TestLabelFiltering();
-            
+
             // Test wildcard choice labels
             TestWildcardChoiceLabels();
             TestIfConditions();
@@ -93,7 +93,7 @@ namespace Spoomples.Extensions.WildcardImporter
             TestMalformedSyntax();
             TestComplexNesting();
             TestSpecialCharacters();
-            
+
             // Test recursive processing regression tests
             TestRecursiveProcessingRegression();
 
@@ -111,7 +111,7 @@ namespace Spoomples.Extensions.WildcardImporter
                     Logs.Error($"  - {failure}");
                 }
             }
-            
+
             // Restore original log level
             Logs.MinimumLevel = originalLogLevel;
         }
@@ -121,21 +121,21 @@ namespace Spoomples.Extensions.WildcardImporter
         private static void TestBasicVariants()
         {
             // Basic variant: {a|b|c}
-            AssertTransform("{summer|autumn|winter|spring} is coming", 
+            AssertTransform("{summer|autumn|winter|spring} is coming",
                            "<wcrandom:summer|autumn|winter|spring> is coming",
                            "Basic variant");
 
             // Single option
-            AssertTransform("{summer} is coming", 
+            AssertTransform("{summer} is coming",
                            "<wcrandom:summer> is coming",
                            "Single option variant");
-            
+
             AssertTransform("{2000|2010|2020} is coming",
                 "<wcrandom:2000|2010|2020> is coming",
                 "Variants with numeric options");
 
             // Multiple variants in one line
-            AssertTransform("I like {red|blue} and {cats|dogs}", 
+            AssertTransform("I like {red|blue} and {cats|dogs}",
                            "I like <wcrandom:red|blue> and <wcrandom:cats|dogs>",
                            "Multiple variants");
         }
@@ -144,17 +144,17 @@ namespace Spoomples.Extensions.WildcardImporter
         {
             // Weighted options: {0.5::a|1::b|0.25::c}
             // Now using native wcrandom weighted syntax instead of duplicating options
-            AssertTransform("{0.5::summer|1::autumn|0.25::winter}", 
+            AssertTransform("{0.5::summer|1::autumn|0.25::winter}",
                            "<wcrandom:0.5::summer|1::autumn|0.25::winter>",
                            "Weighted variant with decimals");
 
             // Mixed weighted and unweighted
-            AssertTransform("{summer|2::autumn|winter}", 
+            AssertTransform("{summer|2::autumn|winter}",
                            "<wcrandom:summer|2::autumn|winter>",
                            "Mixed weighted variant");
 
             // Integer weights
-            AssertTransform("{1::red|3::blue|2::green}", 
+            AssertTransform("{1::red|3::blue|2::green}",
                            "<wcrandom:1::red|3::blue|2::green>",
                            "Integer weighted variant");
         }
@@ -162,12 +162,12 @@ namespace Spoomples.Extensions.WildcardImporter
         private static void TestQuantifierVariants()
         {
             // Pick 2: {2$$a|b|c}
-            AssertTransform("My favorites are {2$$chocolate|vanilla|strawberry}", 
+            AssertTransform("My favorites are {2$$chocolate|vanilla|strawberry}",
                            "My favorites are <wcrandom[2,]:chocolate|vanilla|strawberry>",
                            "Quantifier variant");
 
             // Pick 1 (explicit)
-            AssertTransform("{1$$red|blue|green}", 
+            AssertTransform("{1$$red|blue|green}",
                            "<wcrandom[1,]:red|blue|green>",
                            "Explicit single quantifier");
         }
@@ -175,55 +175,55 @@ namespace Spoomples.Extensions.WildcardImporter
         private static void TestQuantifierVariantsWithPrefixFlags()
         {
             // Test with ~ prefix flag
-            AssertTransform("{~3$$a|b|c}", 
+            AssertTransform("{~3$$a|b|c}",
                            "<wcrandom[3,]:a|b|c>",
                            "Quantifier variant with ~ prefix flag");
 
             // Test with @ prefix flag
-            AssertTransform("{@1-2$$red|blue|green}", 
+            AssertTransform("{@1-2$$red|blue|green}",
                            "<wcrandom[1-2,]:red|blue|green>",
                            "Range variant with @ prefix flag");
 
             // Test with r prefix flag
-            AssertTransform("{r2$$chocolate|vanilla}", 
+            AssertTransform("{r2$$chocolate|vanilla}",
                            "<wcrandom[2,]:chocolate|vanilla>",
                            "Quantifier variant with r prefix flag");
 
             // Test with o prefix flag
-            AssertTransform("{o1-3$$colors|shades|tones}", 
+            AssertTransform("{o1-3$$colors|shades|tones}",
                            "<wcrandom[1-3,]:colors|shades|tones>",
                            "Range variant with o prefix flag");
 
             // Test with multiple prefix flags combined
-            AssertTransform("{~r3$$a|b|c}", 
+            AssertTransform("{~r3$$a|b|c}",
                            "<wcrandom[3,]:a|b|c>",
                            "Quantifier variant with ~r prefix flags");
 
-            AssertTransform("{@o1-2$$a|b|c}", 
+            AssertTransform("{@o1-2$$a|b|c}",
                            "<wcrandom[1-2,]:a|b|c>",
                            "Range variant with @o prefix flags");
 
-            AssertTransform("{ro$$a|b|c}", 
+            AssertTransform("{ro$$a|b|c}",
                            "<wcrandom:a|b|c>",
                            "Simple variant with ro prefix flags (no quantifier)");
 
             // Test with all prefix flags
-            AssertTransform("{~@ro2$$red|green|blue}", 
+            AssertTransform("{~@ro2$$red|green|blue}",
                            "<wcrandom[2,]:red|green|blue>",
                            "Quantifier variant with all prefix flags ~@ro");
 
             // Test prefix flags with no upper bound range
-            AssertTransform("{~2-$$red|blue|green|yellow}", 
+            AssertTransform("{~2-$$red|blue|green|yellow}",
                            "<wcrandom[2-4,]:red|blue|green|yellow>",
                            "No upper bound range with ~ prefix flag");
 
             // Test prefix flags with no lower bound range
-            AssertTransform("{@-3$$red|blue|green}", 
+            AssertTransform("{@-3$$red|blue|green}",
                            "<wcrandom[1-3,]:red|blue|green>",
                            "No lower bound range with @ prefix flag");
 
             // Test prefix flags with wildcards
-            AssertTransform("{~r2$$__flavours__}", 
+            AssertTransform("{~r2$$__flavours__}",
                            "<wcwildcard[2,]:flavours>",
                            "Wildcard quantifier with ~r prefix flags");
         }
@@ -231,42 +231,42 @@ namespace Spoomples.Extensions.WildcardImporter
         private static void TestVariantCustomSeparators()
         {
             // Basic custom separator: {2$$ and $$a|b|c}
-            AssertTransform("Colors: {2$$ and $$red|blue|green}", 
+            AssertTransform("Colors: {2$$ and $$red|blue|green}",
                            "Colors: <wcrandom[2, and ]:red|blue|green>",
                            "Basic variant custom separator");
 
             // Custom separator with range: {2-3$$ or $$chocolate|vanilla|strawberry}
-            AssertTransform("Flavors: {2-3$$ or $$chocolate|vanilla|strawberry}", 
+            AssertTransform("Flavors: {2-3$$ or $$chocolate|vanilla|strawberry}",
                            "Flavors: <wcrandom[2-3, or ]:chocolate|vanilla|strawberry>",
                            "Range variant custom separator");
 
             // Custom separator with prefix flags: {@~2$$ with $$option1|option2|option3}
-            AssertTransform("Choose: {@~2$$ with $$option1|option2|option3}", 
+            AssertTransform("Choose: {@~2$$ with $$option1|option2|option3}",
                            "Choose: <wcrandom[2, with ]:option1|option2|option3>",
                            "Prefix flags with custom separator");
 
             // Complex custom separator: {1-2$$, and also $$item1|item2|item3|item4}
-            AssertTransform("Items: {1-2$$, and also $$item1|item2|item3|item4}", 
+            AssertTransform("Items: {1-2$$, and also $$item1|item2|item3|item4}",
                            "Items: <wcrandom[1-2,, and also ]:item1|item2|item3|item4>",
                            "Complex custom separator");
 
             // Custom separator with no lower bound: {-2$$ plus $$alpha|beta|gamma}
-            AssertTransform("Values: {-2$$ plus $$alpha|beta|gamma}", 
+            AssertTransform("Values: {-2$$ plus $$alpha|beta|gamma}",
                            "Values: <wcrandom[1-2, plus ]:alpha|beta|gamma>",
                            "No lower bound with custom separator");
 
             // Empty custom separator (just $$): {2$$$$red|blue|green}
-            AssertTransform("Empty sep: {2$$$$red|blue|green}", 
+            AssertTransform("Empty sep: {2$$$$red|blue|green}",
                            "Empty sep: <wcrandom[2,]:red|blue|green>",
                            "Empty custom separator");
 
             // Custom separator with spaces: {3$$   between   $$cat|dog|bird}
-            AssertTransform("Pets: {3$$   between   $$cat|dog|bird}", 
+            AssertTransform("Pets: {3$$   between   $$cat|dog|bird}",
                            "Pets: <wcrandom[3,   between   ]:cat|dog|bird>",
                            "Custom separator with spaces");
 
             // Custom separator with special characters: {2$$--$$first|second|third}
-            AssertTransform("Sequence: {2$$--$$first|second|third}", 
+            AssertTransform("Sequence: {2$$--$$first|second|third}",
                            "Sequence: <wcrandom[2,--]:first|second|third>",
                            "Custom separator with special characters");
         }
@@ -274,17 +274,17 @@ namespace Spoomples.Extensions.WildcardImporter
         private static void TestRangeVariants()
         {
             // Range: {2-3$$a|b|c|d}
-            AssertTransform("{2-3$$chocolate|vanilla|strawberry|mint}", 
+            AssertTransform("{2-3$$chocolate|vanilla|strawberry|mint}",
                            "<wcrandom[2-3,]:chocolate|vanilla|strawberry|mint>",
                            "Range variant");
 
             // No lower bound: {-2$$a|b|c}
-            AssertTransform("{-2$$red|blue|green}", 
+            AssertTransform("{-2$$red|blue|green}",
                            "<wcrandom[1-2,]:red|blue|green>",
                            "No lower bound range");
 
             // No upper bound: {2-$$a|b|c|d}
-            AssertTransform("{2-$$red|blue|green|yellow}", 
+            AssertTransform("{2-$$red|blue|green|yellow}",
                            "<wcrandom[2-4,]:red|blue|green|yellow>",
                            "No upper bound range");
         }
@@ -292,17 +292,17 @@ namespace Spoomples.Extensions.WildcardImporter
         private static void TestEmptyVariants()
         {
             // Empty options: {a||c}
-            AssertTransform("{red||blue}", 
+            AssertTransform("{red||blue}",
                            "<wcrandom:red|<comment:empty>|blue>",
                            "Empty option in variant");
 
             // All empty: {||}
-            AssertTransform("{||}", 
+            AssertTransform("{||}",
                            "<wcrandom:<comment:empty>|<comment:empty>|<comment:empty>>",
                            "All empty options");
 
             // Trailing empty: {a|b|}
-            AssertTransform("{red|blue|}", 
+            AssertTransform("{red|blue|}",
                            "<wcrandom:red|blue|<comment:empty>>",
                            "Trailing empty option");
         }
@@ -310,12 +310,12 @@ namespace Spoomples.Extensions.WildcardImporter
         private static void TestNestedVariants()
         {
             // Nested variants: {a|{b|c}|d}
-            AssertTransform("Color is {red|{light blue|dark blue}|green}", 
+            AssertTransform("Color is {red|{light blue|dark blue}|green}",
                            "Color is <wcrandom:red|<wcrandom:light blue|dark blue>|green>",
                            "Nested variants");
 
             // Deep nesting
-            AssertTransform("{a|{b|{c|d}|e}|f}", 
+            AssertTransform("{a|{b|{c|d}|e}|f}",
                            "<wcrandom:a|<wcrandom:b|<wcrandom:c|d>|e>|f>",
                            "Deep nested variants");
         }
@@ -327,21 +327,21 @@ namespace Spoomples.Extensions.WildcardImporter
         private static void TestBasicWildcards()
         {
             // Basic wildcard: __name__
-            AssertTransform("__season__ is coming", 
+            AssertTransform("__season__ is coming",
                            "<wcwildcard:season> is coming",
                            "Basic wildcard");
 
             // Multiple wildcards
-            AssertTransform("I like __color__ __animal__", 
+            AssertTransform("I like __color__ __animal__",
                            "I like <wcwildcard:color> <wcwildcard:animal>",
                            "Multiple wildcards");
 
             // Wildcard with path
-            AssertTransform("__clothing/shirts__ are nice", 
+            AssertTransform("__clothing/shirts__ are nice",
                            "<wcwildcard:clothing/shirts> are nice",
                            "Wildcard with path");
 
-            AssertTransform("__clothing/shirts__ and __clothing/pants__ are required", 
+            AssertTransform("__clothing/shirts__ and __clothing/pants__ are required",
                 "<wcwildcard:clothing/shirts> and <wcwildcard:clothing/pants> are required",
                 "Multiple wildcards");
 
@@ -354,30 +354,30 @@ namespace Spoomples.Extensions.WildcardImporter
         {
             // Wildcards in variants: {2$$__flavours__}
             // This is the correct SD Dynamic Prompts syntax - should use wildcard quantifier
-            AssertTransform("My favourite ice-cream flavours are {2$$__flavours__}", 
+            AssertTransform("My favourite ice-cream flavours are {2$$__flavours__}",
                            "My favourite ice-cream flavours are <wcwildcard[2,]:flavours>",
                            "Wildcards in variants with quantifier");
 
             // Range quantifier with wildcard in variant: {2-3$$__colors__}
-            AssertTransform("Pick {2-3$$__colors__}", 
+            AssertTransform("Pick {2-3$$__colors__}",
                            "Pick <wcwildcard[2-3,]:colors>",
                            "Range quantifier with wildcard in variant");
 
             // Simple wildcard in variant: {__flavours__|vanilla}
-            AssertTransform("I like {__flavours__|vanilla}", 
+            AssertTransform("I like {__flavours__|vanilla}",
                            "I like <wcrandom:<wcwildcard:flavours>|vanilla>",
                            "Simple wildcard in variant");
 
             // Multiple wildcards in quantified variant: {2$$__flavours__|__flavours__}
             // SD Dynamic Prompts treats this as simple variants, each wildcard resolved independently
-            AssertTransform("My favourite ice-cream flavours are {2$$__flavours__|__flavours__}", 
+            AssertTransform("My favourite ice-cream flavours are {2$$__flavours__|__flavours__}",
                            "My favourite ice-cream flavours are <wcrandom[2,]:<wcwildcard:flavours>|<wcwildcard:flavours>>",
                            "Multiple wildcards in quantified variant");
-            
-            AssertTransform("My favorite breed is __{cat|dog}s__", 
+
+            AssertTransform("My favorite breed is __{cat|dog}s__",
                            "My favorite breed is <wcwildcard:<wcrandom:cat|dog>s>",
                            "Variant nested in wildcard name");
-            
+
             AssertTransform("my top 2 breeds are {2$$__{1$$cat|dog}s__}",
                 "my top 2 breeds are <wcwildcard[2,]:<wcrandom[1,]:cat|dog>s>",
                 "Variant nested in wildcard name with quantifier");
@@ -386,26 +386,26 @@ namespace Spoomples.Extensions.WildcardImporter
         private static void TestGlobWildcards()
         {
             // Single glob: __colors*__
-            AssertTransform("__colors*__ are nice", 
+            AssertTransform("__colors*__ are nice",
                            "<wcrandom:<wcwildcard:colors-cold>|<wcwildcard:colors-warm>> are nice",
                            "Single glob wildcard",
                            CreateMockFiles("colors-cold", "colors-warm"));
 
             // Recursive glob: __artists/**__
             // Note: Dictionary enumeration order may vary, so we accept either order
-            AssertTransform("__artists/**__ painted this", 
+            AssertTransform("__artists/**__ painted this",
                            "<wcrandom:<wcwildcard:artists/dutch>|<wcwildcard:artists/finnish>> painted this",
                            "Recursive glob wildcard",
                            CreateMockFiles("artists/finnish", "artists/dutch"));
 
             // No matches - should include warning comment
-            AssertTransform("__nonexistent*__ test", 
+            AssertTransform("__nonexistent*__ test",
                            "<wcwildcard:nonexistent*><comment:no glob matches> test",
                            "No glob matches",
                            CreateMockFiles());
 
             // Single match - should not use random
-            AssertTransform("__unique*__ test", 
+            AssertTransform("__unique*__ test",
                            "<wcwildcard:unique-file> test",
                            "Single glob match",
                            CreateMockFiles("unique-file"));
@@ -414,70 +414,70 @@ namespace Spoomples.Extensions.WildcardImporter
         private static void TestAdvancedWildcardOptions()
         {
             // Basic quantifier: __2$$colors__
-            AssertTransform("I like __2$$colors__", 
+            AssertTransform("I like __2$$colors__",
                            "I like <wcwildcard[2,]:colors>",
                            "Basic wildcard quantifier");
 
             // Range quantifier: __2-3$$animals__
-            AssertTransform("My pets are __2-3$$animals__", 
+            AssertTransform("My pets are __2-3$$animals__",
                            "My pets are <wcwildcard[2-3,]:animals>",
                            "Range wildcard quantifier");
 
             // No lower bound: __-2$$flavors__
-            AssertTransform("Pick __-2$$flavors__", 
+            AssertTransform("Pick __-2$$flavors__",
                            "Pick <wcwildcard[1-2,]:flavors>",
                            "No lower bound wildcard quantifier");
 
 
             // Prefix flags only (ignored): __@~ro$$styles__
-            AssertTransform("Style: __@~ro$$styles__", 
+            AssertTransform("Style: __@~ro$$styles__",
                            "Style: <wcwildcard:styles>",
                            "Prefix flags only wildcard");
 
             // Prefix flags with quantifier: __@~ro2$$moods__
-            AssertTransform("Mood: __@~ro2$$moods__", 
+            AssertTransform("Mood: __@~ro2$$moods__",
                            "Mood: <wcwildcard[2,]:moods>",
                            "Prefix flags with quantifier wildcard");
 
             // Custom separator: __2$$ and $$colors__
-            AssertTransform("Colors: __2$$ and $$colors__", 
+            AssertTransform("Colors: __2$$ and $$colors__",
                            "Colors: <wcwildcard[2, and ]:colors>",
                            "Custom separator wildcard");
 
             // Complex example: __@~ro2-3$$ with $$themes__
-            AssertTransform("Themes: __@~ro2-3$$ with $$themes__", 
+            AssertTransform("Themes: __@~ro2-3$$ with $$themes__",
                            "Themes: <wcwildcard[2-3, with ]:themes>",
                            "Complex advanced wildcard options");
 
             // Mixed with glob patterns: __2$$colors*__
-            AssertTransform("__2$$colors*__ are nice", 
+            AssertTransform("__2$$colors*__ are nice",
                            "<wcrandom[2,]:<wcwildcard:colors-cold>|<wcwildcard:colors-warm>> are nice",
                            "Advanced options with glob wildcard",
                            CreateMockFiles("colors-cold", "colors-warm"));
 
             // Custom separator with glob patterns: __2$$ and $$colors*__
-            AssertTransform("__2$$ and $$colors*__ are nice", 
+            AssertTransform("__2$$ and $$colors*__ are nice",
                            "<wcrandom[2, and ]:<wcwildcard:colors-cold>|<wcwildcard:colors-warm>> are nice",
                            "Custom separator with glob wildcard",
                            CreateMockFiles("colors-cold", "colors-warm"));
 
             // Nested in variants: {__2$$colors__|blue}
-            AssertTransform("I like {__2$$colors__|blue}", 
+            AssertTransform("I like {__2$$colors__|blue}",
                            "I like <wcrandom:<wcwildcard[2,]:colors>|blue>",
                            "Advanced wildcard options in variant");
 
             // Multiple advanced wildcards
-            AssertTransform("__2$$colors__ and __1-3$$animals__", 
+            AssertTransform("__2$$colors__ and __1-3$$animals__",
                            "<wcwildcard[2,]:colors> and <wcwildcard[1-3,]:animals>",
                            "Multiple advanced wildcards");
 
             // Edge case: empty quantifier with $$
-            AssertTransform("__$$colors__", 
+            AssertTransform("__$$colors__",
                            "<wcwildcard:colors>",
                            "Empty quantifier with $$ wildcard");
 
             // Edge case: just prefix flags
-            AssertTransform("__@$$colors__", 
+            AssertTransform("__@$$colors__",
                            "<wcwildcard:colors>",
                            "Just prefix flags wildcard");
         }
@@ -485,78 +485,78 @@ namespace Spoomples.Extensions.WildcardImporter
         private static void TestVariableOverrides()
         {
             // Basic single variable override: __wildcard(var=value)__
-            AssertTransform("__colors(theme=warm)__ are nice", 
+            AssertTransform("__colors(theme=warm)__ are nice",
                            "<wcpushmacro[theme]:warm><wcwildcard:colors><wcpopmacro:theme> are nice",
                            "Basic single variable override");
 
             // Single variable override with commas in value: __wildcard(var=value with, commas)__
-            AssertTransform("__foods(ingredients=salt, pepper, herbs)__ taste good", 
+            AssertTransform("__foods(ingredients=salt, pepper, herbs)__ taste good",
                            "<wcpushmacro[ingredients]:salt, pepper, herbs><wcwildcard:foods><wcpopmacro:ingredients> taste good",
                            "Single variable override with commas in value");
 
             // Variable override with nested parentheses in value: __wildcard(var=value (with nested) text)__
-            AssertTransform("__styles(mood=happy (very excited) feeling)__ today", 
+            AssertTransform("__styles(mood=happy (very excited) feeling)__ today",
                            "<wcpushmacro[mood]:happy (very excited) feeling><wcwildcard:styles><wcpopmacro:mood> today",
                            "Variable override with nested parentheses");
 
             // Variable override with quantifier: __2$$wildcard(var=value)__
-            AssertTransform("__2$$colors(brightness=bright)__ shine", 
+            AssertTransform("__2$$colors(brightness=bright)__ shine",
                            "<wcpushmacro[brightness]:bright><wcwildcard[2,]:colors><wcpopmacro:brightness> shine",
                            "Variable override with quantifier");
 
             // Variable override with range quantifier: __2-3$$wildcard(var=value)__
-            AssertTransform("__2-3$$animals(type=mammal)__ are cute", 
+            AssertTransform("__2-3$$animals(type=mammal)__ are cute",
                            "<wcpushmacro[type]:mammal><wcwildcard[2-3,]:animals><wcpopmacro:type> are cute",
                            "Variable override with range quantifier");
 
             // Variable override with custom separator: __2$$ and $$wildcard(var=value)__
-            AssertTransform("__2$$ and $$colors(tone=pastel)__ blend well", 
+            AssertTransform("__2$$ and $$colors(tone=pastel)__ blend well",
                            "<wcpushmacro[tone]:pastel><wcwildcard[2, and ]:colors><wcpopmacro:tone> blend well",
                            "Variable override with custom separator");
 
             // Variable override with label filter: __wildcard'filter'(var=value)__
-            AssertTransform("__colors'primary'(intensity=high)__ are bold", 
+            AssertTransform("__colors'primary'(intensity=high)__ are bold",
                            "<wcpushmacro[intensity]:high><wcpushmacro[wcfilter_colors]:primary><wcwildcard:colors:primary><wcpopmacro:wcfilter_colors><wcpopmacro:intensity> are bold",
                            "Variable override with label filter");
 
             // Variable override with glob pattern: __wildcard*(var=value)__
-            AssertTransform("__colors*(mood=cheerful)__ are uplifting", 
+            AssertTransform("__colors*(mood=cheerful)__ are uplifting",
                            "<wcpushmacro[mood]:cheerful><wcrandom:<wcwildcard:colors-cold>|<wcwildcard:colors-warm>><wcpopmacro:mood> are uplifting",
                            "Variable override with glob pattern",
                            CreateMockFiles("colors-cold", "colors-warm"));
 
             // Variable override with complex value containing parentheses and commas
-            AssertTransform("__recipes(description=chicken (grilled) with herbs, served hot)__ for dinner", 
+            AssertTransform("__recipes(description=chicken (grilled) with herbs, served hot)__ for dinner",
                            "<wcpushmacro[description]:chicken (grilled) with herbs, served hot><wcwildcard:recipes><wcpopmacro:description> for dinner",
                            "Variable override with complex value");
 
             // Variable override in variants: {__wildcard(var=value)__|other}
-            AssertTransform("I like {__colors(mood=bright)__|dark themes}", 
+            AssertTransform("I like {__colors(mood=bright)__|dark themes}",
                            "I like <wcrandom:<wcpushmacro[mood]:bright><wcwildcard:colors><wcpopmacro:mood>|dark themes>",
                            "Variable override in variant");
 
             // Multiple wildcards with different variable overrides
-            AssertTransform("__colors(tone=warm)__ and __animals(size=small)__ together", 
+            AssertTransform("__colors(tone=warm)__ and __animals(size=small)__ together",
                            "<wcpushmacro[tone]:warm><wcwildcard:colors><wcpopmacro:tone> and <wcpushmacro[size]:small><wcwildcard:animals><wcpopmacro:size> together",
                            "Multiple wildcards with different variable overrides");
 
             // Edge case: empty variable name (should be ignored)
-            AssertTransform("__colors(=value)__ test", 
+            AssertTransform("__colors(=value)__ test",
                            "<wcwildcard:colors> test",
                            "Empty variable name (ignored)");
 
             // Edge case: empty variable value (should be ignored)
-            AssertTransform("__colors(var=)__ test", 
+            AssertTransform("__colors(var=)__ test",
                            "<wcwildcard:colors> test",
                            "Empty variable value (ignored)");
 
             // Edge case: malformed variable assignment (should be ignored)
-            AssertTransform("__colors(noequals)__ test", 
+            AssertTransform("__colors(noequals)__ test",
                            "<wcwildcard:colors> test",
                            "Malformed variable assignment (ignored)");
 
             // Edge case: variable override with no wildcard content
-            AssertTransform("__(var=value)__ test", 
+            AssertTransform("__(var=value)__ test",
                            "<wcpushmacro[var]:value><wcwildcard:><wcpopmacro:var> test",
                            "Variable override with empty wildcard");
         }
@@ -564,114 +564,114 @@ namespace Spoomples.Extensions.WildcardImporter
         private static void TestLabelFiltering()
         {
             // Basic label filter with single quotes: __wildcard'filter'__
-            AssertTransform("__colors'primary'__ are nice", 
+            AssertTransform("__colors'primary'__ are nice",
                            "<wcpushmacro[wcfilter_colors]:primary><wcwildcard:colors:primary><wcpopmacro:wcfilter_colors> are nice",
                            "Basic label filter with single quotes");
 
             // Basic label filter with double quotes: __wildcard\"filter\"__
-            AssertTransform("__colors\"primary\"__ are nice", 
+            AssertTransform("__colors\"primary\"__ are nice",
                            "<wcpushmacro[wcfilter_colors]:primary><wcwildcard:colors:primary><wcpopmacro:wcfilter_colors> are nice",
                            "Basic label filter with double quotes");
 
             // Label filter with quantifier: __2$$wildcard'filter'__
-            AssertTransform("__2$$colors'primary'__ work well", 
+            AssertTransform("__2$$colors'primary'__ work well",
                            "<wcpushmacro[wcfilter_colors]:primary><wcwildcard[2,]:colors:primary><wcpopmacro:wcfilter_colors> work well",
                            "Label filter with quantifier");
 
             // Label filter with range quantifier: __2-3$$wildcard'filter'__
-            AssertTransform("__2-3$$colors'bright'__ are vibrant", 
+            AssertTransform("__2-3$$colors'bright'__ are vibrant",
                            "<wcpushmacro[wcfilter_colors]:bright><wcwildcard[2-3,]:colors:bright><wcpopmacro:wcfilter_colors> are vibrant",
                            "Label filter with range quantifier");
 
             // Label filter with custom separator: __2$$ and $$wildcard'filter'__
-            AssertTransform("__2$$ and $$colors'warm'__ blend nicely", 
+            AssertTransform("__2$$ and $$colors'warm'__ blend nicely",
                            "<wcpushmacro[wcfilter_colors]:warm><wcwildcard[2, and ]:colors:warm><wcpopmacro:wcfilter_colors> blend nicely",
                            "Label filter with custom separator");
 
             // Filter inheritance with ^wildcard syntax: __target'^source'__
-            AssertTransform("__styles'^colors'__ match perfectly", 
+            AssertTransform("__styles'^colors'__ match perfectly",
                            "<wcpushmacro[wcfilter_styles]:<wcmacro:wcfilter_colors>><wcwildcard:styles:<wcmacro:wcfilter_colors>><wcpopmacro:wcfilter_styles> match perfectly",
                            "Filter inheritance with ^wildcard syntax");
 
             // Filter definition with #wildcard syntax: __source'#primary,bright'__
-            AssertTransform("__colors'#primary,bright'__ are defined", 
+            AssertTransform("__colors'#primary,bright'__ are defined",
                            "<wcpushmacro[wcfilter_colors]:primary,bright><wcwildcard:colors><wcpopmacro:wcfilter_colors> are defined",
                            "Filter definition with #wildcard syntax");
 
             // Complex filter with multiple labels: __wildcard'label1,label2+label3'__
-            AssertTransform("__themes'contemporary,futuristic+!alien'__ work", 
+            AssertTransform("__themes'contemporary,futuristic+!alien'__ work",
                            "<wcpushmacro[wcfilter_themes]:contemporary,futuristic+!alien><wcwildcard:themes:contemporary,futuristic+!alien><wcpopmacro:wcfilter_themes> work",
                            "Complex filter with multiple labels");
 
             // Filter with numeric index: __wildcard'42,primary'__
-            AssertTransform("__items'1,special'__ are selected", 
+            AssertTransform("__items'1,special'__ are selected",
                            "<wcpushmacro[wcfilter_items]:2,special><wcwildcard:items:2,special><wcpopmacro:wcfilter_items> are selected",
                            "Filter with numeric index");
 
             // Filter with variables: __wildcard'${genre}+${theme}'__
-            AssertTransform("__styles'<macro:genre>+<macro:theme>'__ match", 
+            AssertTransform("__styles'<macro:genre>+<macro:theme>'__ match",
                            "<wcpushmacro[wcfilter_styles]:<macro:genre>+<macro:theme>><wcwildcard:styles:<macro:genre>+<macro:theme>><wcpopmacro:wcfilter_styles> match",
                            "Filter with variables");
 
             // Label filter with glob patterns: __colors*'bright'__
-            AssertTransform("__colors*'warm'__ are nice", 
+            AssertTransform("__colors*'warm'__ are nice",
                            "<wcrandom:<wcwildcard:colors-cold:warm>|<wcwildcard:colors-warm:warm>> are nice",
                            "Label filter with glob patterns",
                            CreateMockFiles("colors-cold", "colors-warm"));
 
             // Label filter with glob patterns and quantifier: __2$$colors*'bright'__
-            AssertTransform("__2$$colors*'bright'__ work well", 
+            AssertTransform("__2$$colors*'bright'__ work well",
                            "<wcrandom[2,]:<wcwildcard:colors-cold:bright>|<wcwildcard:colors-warm:bright>> work well",
                            "Label filter with glob patterns and quantifier",
                            CreateMockFiles("colors-cold", "colors-warm"));
 
             // Empty filter (should still generate macro management): __wildcard''__
-            AssertTransform("__colors''__ are basic", 
+            AssertTransform("__colors''__ are basic",
                            "<wcpushmacro[wcfilter_colors]:><wcwildcard:colors:><wcpopmacro:wcfilter_colors> are basic",
                            "Empty filter");
 
             // Filter with path wildcards: __path/to/wildcard'filter'__
-            AssertTransform("__themes/modern'sleek'__ designs", 
+            AssertTransform("__themes/modern'sleek'__ designs",
                            "<wcpushmacro[wcfilter_themes_modern]:sleek><wcwildcard:themes/modern:sleek><wcpopmacro:wcfilter_themes_modern> designs",
                            "Filter with path wildcards");
 
             // Multiple filtered wildcards in one line
-            AssertTransform("__colors'bright'__ and __textures'smooth'__ combine", 
+            AssertTransform("__colors'bright'__ and __textures'smooth'__ combine",
                            "<wcpushmacro[wcfilter_colors]:bright><wcwildcard:colors:bright><wcpopmacro:wcfilter_colors> and <wcpushmacro[wcfilter_textures]:smooth><wcwildcard:textures:smooth><wcpopmacro:wcfilter_textures> combine",
                            "Multiple filtered wildcards");
 
             // Filter inheritance chain: __target1'^source'__ then __target2'^target1'__
-            AssertTransform("__styles'^colors'__ then __moods'^styles'__", 
+            AssertTransform("__styles'^colors'__ then __moods'^styles'__",
                            "<wcpushmacro[wcfilter_styles]:<wcmacro:wcfilter_colors>><wcwildcard:styles:<wcmacro:wcfilter_colors>><wcpopmacro:wcfilter_styles> then <wcpushmacro[wcfilter_moods]:<wcmacro:wcfilter_styles>><wcwildcard:moods:<wcmacro:wcfilter_styles>><wcpopmacro:wcfilter_moods>",
                            "Filter inheritance chain");
 
             // Filter definition followed by inheritance: __source'#primary'__ then __target'^source'__
-            AssertTransform("__colors'#primary'__ then __styles'^colors'__", 
+            AssertTransform("__colors'#primary'__ then __styles'^colors'__",
                            "<wcpushmacro[wcfilter_colors]:primary><wcwildcard:colors><wcpopmacro:wcfilter_colors> then <wcpushmacro[wcfilter_styles]:<wcmacro:wcfilter_colors>><wcwildcard:styles:<wcmacro:wcfilter_colors>><wcpopmacro:wcfilter_styles>",
                            "Filter definition followed by inheritance");
 
             // Filter with prefix flags: __@~ro2$$wildcard'filter'__
-            AssertTransform("__@~ro2$$themes'modern'__ are selected", 
+            AssertTransform("__@~ro2$$themes'modern'__ are selected",
                            "<wcpushmacro[wcfilter_themes]:modern><wcwildcard[2,]:themes:modern><wcpopmacro:wcfilter_themes> are selected",
                            "Filter with prefix flags");
 
             // Filter with variants in filter content: __wildcard'{primary|secondary}'__
-            AssertTransform("__colors'<wcrandom:primary|secondary>'__ work", 
+            AssertTransform("__colors'<wcrandom:primary|secondary>'__ work",
                            "<wcpushmacro[wcfilter_colors]:<wcrandom:primary|secondary>><wcwildcard:colors:<wcrandom:primary|secondary>><wcpopmacro:wcfilter_colors> work",
                            "Filter with variants in filter content");
 
             // Edge case: filter with special characters: __wildcard'label+with-special_chars'__
-            AssertTransform("__items'special-label+with_chars'__ selected", 
+            AssertTransform("__items'special-label+with_chars'__ selected",
                            "<wcpushmacro[wcfilter_items]:special-label+with_chars><wcwildcard:items:special-label+with_chars><wcpopmacro:wcfilter_items> selected",
                            "Filter with special characters");
 
             // Edge case: no filter should work normally: __wildcard__
-            AssertTransform("__colors__ are normal", 
+            AssertTransform("__colors__ are normal",
                            "<wcwildcard:colors> are normal",
                            "No filter works normally");
 
             // Edge case: filter with advanced wildcard options and glob: __2$$ and $$colors*'warm'__
-            AssertTransform("__2$$ and $$colors*'warm'__ work", 
+            AssertTransform("__2$$ and $$colors*'warm'__ work",
                            "<wcrandom[2, and ]:<wcwildcard:colors-cold:warm>|<wcwildcard:colors-warm:warm>> work",
                            "Filter with advanced options and glob",
                            CreateMockFiles("colors-cold", "colors-warm"));
@@ -790,44 +790,44 @@ namespace Spoomples.Extensions.WildcardImporter
         private static void TestVariableAssignments()
         {
             // Deferred assignment: ${var=value}
-            AssertTransform("${color=red} The ${color} car", 
+            AssertTransform("${color=red} The ${color} car",
                            "<setmacro[color,false]:red> The <macro:color> car",
                            "Deferred variable assignment");
-            
+
             AssertTransform("${color=!red}  The ${color} car",
                 "<setvar[color,false]:red><setmacro[color,false]:<var:color>>  The <macro:color> car",
                 "Immediate variable assignment");
-            
+
             AssertTransform("${season=!__season__}${year={2000|2010|2020}} The ${season} of ${year}",
                 "<setvar[season,false]:<wcwildcard:season>><setmacro[season,false]:<var:season>><setmacro[year,false]:<wcrandom:2000|2010|2020>> The <macro:season> of <macro:year>",
                 "Complex assignments");
 
             // Multiple assignments
-            AssertTransform("${a=1}${b=2} Values: ${a}, ${b}", 
+            AssertTransform("${a=1}${b=2} Values: ${a}, ${b}",
                            "<setmacro[a,false]:1><setmacro[b,false]:2> Values: <macro:a>, <macro:b>",
                            "Multiple variable assignments");
 
-            AssertTransform("${color=red} car", 
+            AssertTransform("${color=red} car",
                            "<setmacro[color,false]:red> car",
                            "Variable with simple value");
-            
-            AssertTransform("${color={red|blue}} car", 
+
+            AssertTransform("${color={red|blue}} car",
                            "<setmacro[color,false]:<wcrandom:red|blue>> car",
                            "Variable with variant value");
-            
-            AssertTransform("${color=__colors__} car", 
+
+            AssertTransform("${color=__colors__} car",
                            "<setmacro[color,false]:<wcwildcard:colors>> car",
                            "Variable with wildcard value");
-            
-            AssertTransform("${colors={2$$red|blue|green}} palette", 
+
+            AssertTransform("${colors={2$$red|blue|green}} palette",
                            "<setmacro[colors,false]:<wcrandom[2,]:red|blue|green>> palette",
                            "Variable with quantified variant");
-            
-            AssertTransform("${color={2::red|blue}} car", 
+
+            AssertTransform("${color={2::red|blue}} car",
                            "<setmacro[color,false]:<wcrandom:2::red|blue>> car",
                            "Variable with weighted variant");
-            
-            AssertTransform("${color=!{red|blue}} car", 
+
+            AssertTransform("${color=!{red|blue}} car",
                            "<setvar[color,false]:<wcrandom:red|blue>><setmacro[color,false]:<var:color>> car",
                            "Immediate variable with variant");
         }
@@ -835,12 +835,12 @@ namespace Spoomples.Extensions.WildcardImporter
         private static void TestVariableAccess()
         {
             // Variable access: ${var}
-            AssertTransform("The ${color} car is ${size}", 
+            AssertTransform("The ${color} car is ${size}",
                            "The <macro:color> car is <macro:size>",
                            "Variable access");
 
             // Variable in variant
-            AssertTransform("{${color}|blue} car", 
+            AssertTransform("{${color}|blue} car",
                            "<wcrandom:<macro:color>|blue> car",
                            "Variable in variant");
         }
@@ -848,12 +848,12 @@ namespace Spoomples.Extensions.WildcardImporter
         private static void TestImmediateVariables()
         {
             // Immediate assignment: ${var=!value}
-            AssertTransform("${color=!red} The ${color} car", 
+            AssertTransform("${color=!red} The ${color} car",
                            "<setvar[color,false]:red><setmacro[color,false]:<var:color>> The <macro:color> car",
                            "Immediate variable assignment");
 
             // Immediate with variant
-            AssertTransform("${choice=!{red|blue}} Color is ${choice}", 
+            AssertTransform("${choice=!{red|blue}} Color is ${choice}",
                            "<setvar[choice,false]:<wcrandom:red|blue>><setmacro[choice,false]:<var:choice>> Color is <macro:choice>",
                            "Immediate variable with variant");
         }
@@ -865,106 +865,106 @@ namespace Spoomples.Extensions.WildcardImporter
         private static void TestPromptEditing()
         {
             // Basic prompt editing: [from:to:step]
-            AssertTransform("[girl:boy:5] walking", 
+            AssertTransform("[girl:boy:5] walking",
                            "<fromto[5]:girl||boy> walking",
                            "Basic prompt editing");
 
             // Prompt editing with decimal step
-            AssertTransform("[happy:sad:0.5] face", 
+            AssertTransform("[happy:sad:0.5] face",
                            "<fromto[0.5]:happy||sad> face",
                            "Prompt editing with decimal step");
 
             // Missing from value: [:to:step]
-            AssertTransform("[:boy:3] character", 
+            AssertTransform("[:boy:3] character",
                            "<fromto[3]:<comment:empty>||boy> character",
                            "Prompt editing missing from value");
 
             // Special to-only syntax: [to:step]
-            AssertTransform("[:boy:3] character", 
+            AssertTransform("[:boy:3] character",
                 "<fromto[3]:<comment:empty>||boy> character",
                 "Special to-only syntax");
 
             // Missing to value: [from::step]
-            AssertTransform("[girl::7] character", 
+            AssertTransform("[girl::7] character",
                            "<fromto[7]:girl||<comment:empty>> character",
                            "Prompt editing missing to value");
 
             // Missing both from and to: [::step]
-            AssertTransform("[::2] something", 
+            AssertTransform("[::2] something",
                            "<fromto[2]:<comment:empty>||<comment:empty>> something",
                            "Prompt editing missing from and to values");
 
             // Multiple prompt editing in one line
-            AssertTransform("[girl:boy:5] and [happy:sad:3] person", 
+            AssertTransform("[girl:boy:5] and [happy:sad:3] person",
                            "<fromto[5]:girl||boy> and <fromto[3]:happy||sad> person",
                            "Multiple prompt editing");
 
             // Prompt editing with variants in from/to
-            AssertTransform("[{red|blue}:green:0.4] car", 
+            AssertTransform("[{red|blue}:green:0.4] car",
                            "<fromto[0.4]:<wcrandom:red|blue>||green> car",
                            "Prompt editing with variant in from");
 
-            AssertTransform("[red:{blue|green}:2] car", 
+            AssertTransform("[red:{blue|green}:2] car",
                            "<fromto[2]:red||<wcrandom:blue|green>> car",
                            "Prompt editing with variant in to");
 
             // Prompt editing with wildcards in from/to
-            AssertTransform("[__colors__:green:6] background", 
+            AssertTransform("[__colors__:green:6] background",
                            "<fromto[6]:<wcwildcard:colors>||green> background",
                            "Prompt editing with wildcard in from");
 
-            AssertTransform("[red:__colors__:8] background", 
+            AssertTransform("[red:__colors__:8] background",
                            "<fromto[8]:red||<wcwildcard:colors>> background",
                            "Prompt editing with wildcard in to");
 
             // Prompt editing with complex nested content
-            AssertTransform("[{red|__colors__}:{blue|green}:1.5] complex", 
+            AssertTransform("[{red|__colors__}:{blue|green}:1.5] complex",
                            "<fromto[1.5]:<wcrandom:red|<wcwildcard:colors>>||<wcrandom:blue|green>> complex",
                            "Prompt editing with complex nested content");
 
             // Prompt editing with variables
-            AssertTransform("[${color}:blue:4] car", 
+            AssertTransform("[${color}:blue:4] car",
                            "<fromto[4]:<macro:color>||blue> car",
                            "Prompt editing with variable in from");
 
             // Prompt editing should be processed BEFORE negative attention
             // This ensures [text:other:5] is treated as prompt editing, not negative attention
-            AssertTransform("[girl:boy:5] but not [negative] attention", 
+            AssertTransform("[girl:boy:5] but not [negative] attention",
                            "<fromto[5]:girl||boy> but not (negative:0.9) attention",
                            "Prompt editing processed before negative attention");
 
             // Edge case: malformed prompt editing (only one colon) should be treated as negative attention
-            AssertTransform("[girl:boy] should be negative", 
+            AssertTransform("[girl:boy] should be negative",
                            "(girl:boy:0.9) should be negative",
                            "Malformed prompt editing treated as negative attention");
 
             // Edge case: no colons should be treated as negative attention
-            AssertTransform("[just text] should be negative", 
+            AssertTransform("[just text] should be negative",
                            "(just text:0.9) should be negative",
                            "No colons treated as negative attention");
 
             // Edge case: empty step is still valid prompt editing syntax - let SwarmUI validate
-            AssertTransform("[girl:boy:] should be negative", 
+            AssertTransform("[girl:boy:] should be negative",
                            "<fromto[<comment:empty>]:girl||boy> should be negative",
                            "Empty step treated as prompt editing");
 
             // Edge case: non-numeric step is still valid prompt editing syntax - let SwarmUI validate
-            AssertTransform("[girl:boy:abc] should be negative", 
+            AssertTransform("[girl:boy:abc] should be negative",
                            "<fromto[abc]:girl||boy> should be negative",
                            "Non-numeric step treated as prompt editing");
 
             // Nested variants in from/to values (more realistic scenario)
-            AssertTransform("[{red|blue}:target:3] test", 
+            AssertTransform("[{red|blue}:target:3] test",
                            "<fromto[3]:<wcrandom:red|blue>||target> test",
                            "Prompt editing with nested variant in from value");
 
             // Complex but realistic nesting with wildcards and variants
-            AssertTransform("[{__colors__|red}:{blue|__shades__}:2.5] background", 
+            AssertTransform("[{__colors__|red}:{blue|__shades__}:2.5] background",
                            "<fromto[2.5]:<wcrandom:<wcwildcard:colors>|red>||<wcrandom:blue|<wcwildcard:shades>>> background",
                            "Prompt editing with complex realistic nesting");
 
             // Escaped colons should not split prompt editing
-            AssertTransform("[text\\:with\\:colons:target:5] test", 
+            AssertTransform("[text\\:with\\:colons:target:5] test",
                            "<fromto[5]:text\\:with\\:colons||target> test",
                            "Prompt editing with escaped colons");
         }
@@ -976,74 +976,74 @@ namespace Spoomples.Extensions.WildcardImporter
         private static void TestAlternatingWords()
         {
             // Basic alternating words: [word1|word2]
-            AssertTransform("[cow|horse] in a field", 
+            AssertTransform("[cow|horse] in a field",
                            "<alternate:cow||horse> in a field",
                            "Basic alternating words");
 
             // Single word (should not be treated as alternating)
-            AssertTransform("[cow] in a field", 
+            AssertTransform("[cow] in a field",
                            "(cow:0.9) in a field",
                            "Single word treated as negative attention");
 
             // Multiple alternating words: [word1|word2|word3|word4]
-            AssertTransform("[cow|cow|horse|man|siberian tiger|ox|man] in a field", 
+            AssertTransform("[cow|cow|horse|man|siberian tiger|ox|man] in a field",
                            "<alternate:cow||cow||horse||man||siberian tiger||ox||man> in a field",
                            "Multiple alternating words");
 
             // Multiple alternating sequences in one line
-            AssertTransform("[red|blue] car with [big|small] wheels", 
+            AssertTransform("[red|blue] car with [big|small] wheels",
                            "<alternate:red||blue> car with <alternate:big||small> wheels",
                            "Multiple alternating sequences");
 
             // Alternating words with variants inside
-            AssertTransform("[{red|crimson}|blue] car", 
+            AssertTransform("[{red|crimson}|blue] car",
                            "<alternate:<wcrandom:red|crimson>||blue> car",
                            "Alternating words with variant in option");
 
             // Alternating words with wildcards inside
-            AssertTransform("[__colors__|blue] background", 
+            AssertTransform("[__colors__|blue] background",
                            "<alternate:<wcwildcard:colors>||blue> background",
                            "Alternating words with wildcard in option");
 
             // Alternating words with variables inside
-            AssertTransform("[${color}|blue] car", 
+            AssertTransform("[${color}|blue] car",
                            "<alternate:<macro:color>||blue> car",
                            "Alternating words with variable in option");
 
             // Complex nesting with alternating words
-            AssertTransform("[{red|__colors__}|{blue|green}] complex", 
+            AssertTransform("[{red|__colors__}|{blue|green}] complex",
                            "<alternate:<wcrandom:red|<wcwildcard:colors>>||<wcrandom:blue|green>> complex",
                            "Alternating words with complex nested content");
 
             // Alternating words should be processed AFTER prompt editing
             // This ensures [from:to:step] is handled before [word1|word2]
-            AssertTransform("[girl:boy:5] and [red|blue] car", 
+            AssertTransform("[girl:boy:5] and [red|blue] car",
                            "<fromto[5]:girl||boy> and <alternate:red||blue> car",
                            "Alternating words processed after prompt editing");
 
             // Empty options in alternating words
-            AssertTransform("[red||blue] car", 
+            AssertTransform("[red||blue] car",
                            "<alternate:red||<comment:empty>||blue> car",
                            "Alternating words with empty option");
 
             // Alternating words with escaped pipes
-            AssertTransform("[red\\|crimson|blue] car", 
+            AssertTransform("[red\\|crimson|blue] car",
                            "<alternate:red\\|crimson||blue> car",
                            "Alternating words with escaped pipe");
 
             // Edge case: alternating words should not conflict with negative attention
             // Single option should be negative attention, multiple should be alternating
-            AssertTransform("[single] vs [first|second]", 
+            AssertTransform("[single] vs [first|second]",
                            "(single:0.9) vs <alternate:first||second>",
                            "Single vs multiple options handling");
 
             // More realistic nested alternating words
-            AssertTransform("[red {bright|dark}|blue] car", 
+            AssertTransform("[red {bright|dark}|blue] car",
                            "<alternate:red <wcrandom:bright|dark>||blue> car",
                            "Alternating words with nested variant");
 
             // Complex but realistic alternating with wildcards
-            AssertTransform("[__colors__ bright|dark __shades__] theme", 
+            AssertTransform("[__colors__ bright|dark __shades__] theme",
                            "<alternate:<wcwildcard:colors> bright||dark <wcwildcard:shades>> theme",
                            "Alternating words with realistic complex nesting");
         }
@@ -1055,71 +1055,71 @@ namespace Spoomples.Extensions.WildcardImporter
         private static void TestNegativeAttention()
         {
             // Basic negative attention: [text]
-            AssertTransform("A beautiful [ugly] woman", 
+            AssertTransform("A beautiful [ugly] woman",
                            "A beautiful (ugly:0.9) woman",
                            "Basic negative attention");
 
             // Multiple negative attention blocks
-            AssertTransform("[bad] and [worse] things", 
+            AssertTransform("[bad] and [worse] things",
                            "(bad:0.9) and (worse:0.9) things",
                            "Multiple negative attention blocks");
 
             // Negative attention with variants
-            AssertTransform("[some {a|b|c} text]", 
+            AssertTransform("[some {a|b|c} text]",
                            "(some <wcrandom:a|b|c> text:0.9)",
                            "Negative attention with variants");
 
             // Negative attention with wildcards
-            AssertTransform("[some __wildcard__ text]", 
+            AssertTransform("[some __wildcard__ text]",
                            "(some <wcwildcard:wildcard> text:0.9)",
                            "Negative attention with wildcards");
 
             // Negative attention with quantified wildcards
-            AssertTransform("[some {2$$__wildcard__} text]", 
+            AssertTransform("[some {2$$__wildcard__} text]",
                            "(some <wcwildcard[2,]:wildcard> text:0.9)",
                            "Negative attention with quantified wildcards");
 
             // Negative attention with complex SwarmUI syntax
-            AssertTransform("[some <random[3,]this|variant|already|in|swarm|syntax> text]", 
+            AssertTransform("[some <random[3,]this|variant|already|in|swarm|syntax> text]",
                            "(some <random[3,]this|variant|already|in|swarm|syntax> text:0.9)",
                            "Negative attention with SwarmUI syntax");
 
             // Complex example from user request
-            AssertTransform("[some {a|b|c} __somewildcard__ {2$$__somewildcard__} <random[3,]this|variant|already|in|swarm|syntax>]", 
+            AssertTransform("[some {a|b|c} __somewildcard__ {2$$__somewildcard__} <random[3,]this|variant|already|in|swarm|syntax>]",
                            "(some <wcrandom:a|b|c> <wcwildcard:somewildcard> <wcwildcard[2,]:somewildcard> <random[3,]this|variant|already|in|swarm|syntax>:0.9)",
                            "Complex negative attention example");
 
             // Negative attention with variables
-            AssertTransform("[${color=red} ${color} car]", 
+            AssertTransform("[${color=red} ${color} car]",
                            "(<setmacro[color,false]:red> <macro:color> car:0.9)",
                            "Negative attention with variables");
 
             // Nested negative attention (inner brackets should also be processed)
-            AssertTransform("[outer [inner] text]", 
+            AssertTransform("[outer [inner] text]",
                            "(outer (inner:0.9) text:0.9)",
                            "Nested negative attention brackets");
-            
+
             AssertTransform("[[[light]]]",
                 "(light:0.729)", // 0.729 = Pow(0.9, 3) rounded to 3 decimals
                 "Nested negative attention should collapse into single attention with weight = 0.9^nestLevel");
 
             // Empty negative attention
-            AssertTransform("[]", 
+            AssertTransform("[]",
                            "(:0.9)",
                            "Empty negative attention");
 
             // Negative attention with whitespace
-            AssertTransform("[ some text ]", 
+            AssertTransform("[ some text ]",
                            "( some text :0.9)",
                            "Negative attention with whitespace");
 
             // Multiple negative attention in complex text
-            AssertTransform("A [bad] person with {red|blue} hair and [terrible] attitude", 
+            AssertTransform("A [bad] person with {red|blue} hair and [terrible] attitude",
                            "A (bad:0.9) person with <wcrandom:red|blue> hair and (terrible:0.9) attitude",
                            "Multiple negative attention in complex text");
 
             // Negative attention with escaped brackets (should not transform)
-            AssertTransform("This \\[should not transform\\]", 
+            AssertTransform("This \\[should not transform\\]",
                            "This \\[should not transform\\]",
                            "Escaped negative attention brackets");
         }
@@ -1131,22 +1131,22 @@ namespace Spoomples.Extensions.WildcardImporter
         private static void TestMalformedSyntax()
         {
             // Unclosed braces
-            AssertTransform("{red|blue car", 
+            AssertTransform("{red|blue car",
                            "{red|blue car",
                            "Unclosed variant brace");
 
             // Unclosed variable
-            AssertTransform("${color=red car", 
+            AssertTransform("${color=red car",
                            "${color=red car",
                            "Unclosed variable brace");
 
             // Empty variant
-            AssertTransform("{} car", 
+            AssertTransform("{} car",
                            "<wcrandom:<comment:empty>> car",
                            "Empty variant");
 
             // Malformed wildcard
-            AssertTransform("__incomplete", 
+            AssertTransform("__incomplete",
                            "__incomplete",
                            "Incomplete wildcard");
         }
@@ -1154,17 +1154,17 @@ namespace Spoomples.Extensions.WildcardImporter
         private static void TestComplexNesting()
         {
             // Variant with wildcard
-            AssertTransform("{__colors__|blue} car", 
+            AssertTransform("{__colors__|blue} car",
                            "<wcrandom:<wcwildcard:colors>|blue> car",
                            "Variant with wildcard");
 
             // Variable with variant and wildcard
-            AssertTransform("${style={modern|__historical__}} ${style} building", 
+            AssertTransform("${style={modern|__historical__}} ${style} building",
                            "<setmacro[style,false]:<wcrandom:modern|<wcwildcard:historical>>> <macro:style> building",
                            "Complex nesting");
 
             // Quantifier with nested structures
-            AssertTransform("{2$$__colors__|{red|blue}|green}", 
+            AssertTransform("{2$$__colors__|{red|blue}|green}",
                            "<wcrandom[2,]:<wcwildcard:colors>|<wcrandom:red|blue>|green>",
                            "Quantifier with nested structures");
 
@@ -1176,17 +1176,17 @@ namespace Spoomples.Extensions.WildcardImporter
         private static void TestSpecialCharacters()
         {
             // Escaped characters in variants
-            AssertTransform("{red\\|blue|green}", 
+            AssertTransform("{red\\|blue|green}",
                            "<wcrandom:red\\|blue|green>",
                            "Escaped pipe in variant");
 
             // Special characters in wildcards
-            AssertTransform("__special-chars_123__ test", 
+            AssertTransform("__special-chars_123__ test",
                            "<wcwildcard:special-chars_123> test",
                            "Special characters in wildcard");
 
             // Unicode characters
-            AssertTransform("{café|naïve} word", 
+            AssertTransform("{café|naïve} word",
                            "<wcrandom:café|naïve> word",
                            "Unicode characters");
         }
@@ -1198,52 +1198,52 @@ namespace Spoomples.Extensions.WildcardImporter
         private static void TestSetCommandLongForm()
         {
             // Basic set command: <ppp:set varname>value<ppp:/set>
-            AssertTransform("<ppp:set color>red<ppp:/set>", 
+            AssertTransform("<ppp:set color>red<ppp:/set>",
                            "<setmacro[color,false]:red>",
                            "Basic set command long form");
 
             // Set with evaluate modifier: <ppp:set varname evaluate>value<ppp:/set>
-            AssertTransform("<ppp:set color evaluate>red<ppp:/set>", 
+            AssertTransform("<ppp:set color evaluate>red<ppp:/set>",
                            "<setvar[color,false]:red><setmacro[color,false]:<var:color>>",
                            "Set command with evaluate modifier");
 
             // Set with add modifier: <ppp:set varname add>value<ppp:/set>
-            AssertTransform("<ppp:set color add>blue<ppp:/set>", 
+            AssertTransform("<ppp:set color add>blue<ppp:/set>",
                            "<wcaddmacro[color]:, blue>",
                            "Set command with add modifier");
 
             // Set with evaluate add modifiers: <ppp:set varname evaluate add>value<ppp:/set>
-            AssertTransform("<ppp:set color evaluate add>blue<ppp:/set>", 
+            AssertTransform("<ppp:set color evaluate add>blue<ppp:/set>",
                            "<setvar[color,false]:<macro:color>, blue><setmacro[color,false]:<var:color>>",
                            "Set command with evaluate add modifiers");
 
             // Set with evaluate add modifiers in different order: <ppp:set varname add evaluate>value<ppp:/set>
-            AssertTransform("<ppp:set color add evaluate>blue<ppp:/set>", 
+            AssertTransform("<ppp:set color add evaluate>blue<ppp:/set>",
                 "<setvar[color,false]:<macro:color>, blue><setmacro[color,false]:<var:color>>",
                 "Set command with evaluate add modifiers");
 
             // Set with ifundefined modifier: <ppp:set varname ifundefined>value<ppp:/set>
-            AssertTransform("<ppp:set color ifundefined>green<ppp:/set>", 
+            AssertTransform("<ppp:set color ifundefined>green<ppp:/set>",
                            "<wcmatch:<wccase[length(color) eq 0]:<setmacro[color,false]:green>>>",
                            "Set command with ifundefined modifier");
 
             // Set with evaluate ifundefined modifiers: <ppp:set varname evaluate ifundefined>value<ppp:/set>
-            AssertTransform("<ppp:set color evaluate ifundefined>green<ppp:/set>", 
+            AssertTransform("<ppp:set color evaluate ifundefined>green<ppp:/set>",
                            "<wcmatch:<wccase[length(color) eq 0]:<setvar[color,false]:green><setmacro[color,false]:<var:color>>>>",
                            "Set command with evaluate ifundefined modifiers");
 
             // Set with ifundefined evaluate modifiers in different order: <ppp:set varname ifundefined evaluate>value<ppp:/set>
-            AssertTransform("<ppp:set color ifundefined evaluate>green<ppp:/set>", 
+            AssertTransform("<ppp:set color ifundefined evaluate>green<ppp:/set>",
                            "<wcmatch:<wccase[length(color) eq 0]:<setvar[color,false]:green><setmacro[color,false]:<var:color>>>>",
                            "Set command with ifundefined evaluate modifiers");
 
             // Set with complex value containing variants
-            AssertTransform("<ppp:set mood>{happy|sad}<ppp:/set>", 
+            AssertTransform("<ppp:set mood>{happy|sad}<ppp:/set>",
                            "<setmacro[mood,false]:<wcrandom:happy|sad>>",
                            "Set command with variant value");
 
             // Set with complex value containing wildcards
-            AssertTransform("<ppp:set style>__art_styles__<ppp:/set>", 
+            AssertTransform("<ppp:set style>__art_styles__<ppp:/set>",
                            "<setmacro[style,false]:<wcwildcard:art_styles>>",
                            "Set command with wildcard value");
         }
@@ -1251,53 +1251,53 @@ namespace Spoomples.Extensions.WildcardImporter
         private static void TestSetCommandShortForm()
         {
             // Basic assignment (already supported): ${var=value}
-            AssertTransform("${color=red}", 
+            AssertTransform("${color=red}",
                            "<setmacro[color,false]:red>",
                            "Basic assignment short form");
 
             // Immediate assignment (already supported): ${var=!value}
-            AssertTransform("${color=!red}", 
+            AssertTransform("${color=!red}",
                            "<setvar[color,false]:red><setmacro[color,false]:<var:color>>",
                            "Immediate assignment short form");
 
             // Add assignment: ${var+=value}
-            AssertTransform("${color+=blue}", 
+            AssertTransform("${color+=blue}",
                            "<wcaddmacro[color]:, blue>",
                            "Add assignment short form");
 
             // Immediate add assignment: ${var+=!value}
             // Immediate add assignment needs to trigger evaluation of the variable, so the emitted code is more complicated than you might expect and does not use wcadd...
-            AssertTransform("${color+=!blue}", 
+            AssertTransform("${color+=!blue}",
                            "<setvar[color,false]:<macro:color>, blue><setmacro[color,false]:<var:color>>",
                            "Immediate add assignment short form");
 
             // Immediate add assignment with complex value: ${var+=!{variant|value}}
-            AssertTransform("${mood+=!{happy|excited}}", 
+            AssertTransform("${mood+=!{happy|excited}}",
                            "<setvar[mood,false]:<macro:mood>, <wcrandom:happy|excited>><setmacro[mood,false]:<var:mood>>",
                            "Immediate add assignment with variant value");
 
             // Ifundefined assignment: ${var?=value}
-            AssertTransform("${color?=green}", 
+            AssertTransform("${color?=green}",
                            "<wcmatch:<wccase[length(color) eq 0]:<setmacro[color,false]:green>>>",
                            "Ifundefined assignment short form");
 
             // Immediate ifundefined assignment: ${var?=!value}
-            AssertTransform("${color?=!green}", 
+            AssertTransform("${color?=!green}",
                            "<wcmatch:<wccase[length(color) eq 0]:<setvar[color,false]:green><setmacro[color,false]:<var:color>>>>",
                            "Immediate ifundefined assignment short form");
 
             // Add assignment with variant value
-            AssertTransform("${mood+={happy|excited}}", 
+            AssertTransform("${mood+={happy|excited}}",
                            "<wcaddmacro[mood]:, <wcrandom:happy|excited>>",
                            "Add assignment with variant value");
 
             // Ifundefined assignment with wildcard value
-            AssertTransform("${style?=__modern_styles__}", 
+            AssertTransform("${style?=__modern_styles__}",
                            "<wcmatch:<wccase[length(style) eq 0]:<setmacro[style,false]:<wcwildcard:modern_styles>>>>",
                            "Ifundefined assignment with wildcard value");
 
             // Multiple assignments in sequence
-            AssertTransform("${color=red}${mood+=happy}${style?=modern}", 
+            AssertTransform("${color=red}${mood+=happy}${style?=modern}",
                            "<setmacro[color,false]:red><wcaddmacro[mood]:, happy><wcmatch:<wccase[length(style) eq 0]:<setmacro[style,false]:modern>>>",
                            "Multiple assignments in sequence");
         }
@@ -1305,27 +1305,27 @@ namespace Spoomples.Extensions.WildcardImporter
         private static void TestSetCommandEdgeCases()
         {
             // Empty value
-            AssertTransform("<ppp:set color><ppp:/set>", 
+            AssertTransform("<ppp:set color><ppp:/set>",
                            "<setmacro[color,false]:<comment:empty>>",
                            "Set command with empty value");
 
             // Variable name with underscores and numbers
-            AssertTransform("${my_var_123=test}", 
+            AssertTransform("${my_var_123=test}",
                            "<setmacro[my_var_123,false]:test>",
                            "Variable name with underscores and numbers");
 
             // Whitespace in long form
-            AssertTransform("<ppp:set color evaluate add >  blue  <ppp:/set>", 
+            AssertTransform("<ppp:set color evaluate add >  blue  <ppp:/set>",
                            "<setvar[color,false]:<macro:color>,   blue  ><setmacro[color,false]:<var:color>>",
                            "Set command with whitespace");
 
             // Nested set commands (should not be supported, treat as literal)
-            AssertTransform("<ppp:set outer><ppp:set inner>value<ppp:/set><ppp:/set>", 
+            AssertTransform("<ppp:set outer><ppp:set inner>value<ppp:/set><ppp:/set>",
                            "<setmacro[outer,false]:<ppp:set inner>value><ppp:/set>",
                            "Nested set commands");
 
             // Invalid modifier combinations (add and ifundefined together - should log warning)
-            AssertTransform("<ppp:set color add ifundefined>blue<ppp:/set>", 
+            AssertTransform("<ppp:set color add ifundefined>blue<ppp:/set>",
                            "<ppp:set color add ifundefined>blue<ppp:/set>",
                            "Invalid modifier combination");
         }
@@ -1337,37 +1337,37 @@ namespace Spoomples.Extensions.WildcardImporter
         private static void TestEchoCommandLongForm()
         {
             // Basic echo without default: <ppp:echo varname>
-            AssertTransform("<ppp:echo color>", 
+            AssertTransform("<ppp:echo color>",
                            "<macro:color>",
                            "Basic echo command long form");
 
             // Echo with default value: <ppp:echo varname>default<ppp:/echo>
-            AssertTransform("<ppp:echo color>red<ppp:/echo>", 
+            AssertTransform("<ppp:echo color>red<ppp:/echo>",
                            "<wcmatch:<wccase[length(color) eq 0]:red><wccase:<macro:color>>>",
                            "Echo command with default value");
 
             // Echo with complex default containing variants
-            AssertTransform("<ppp:echo mood>{happy|sad}<ppp:/echo>", 
+            AssertTransform("<ppp:echo mood>{happy|sad}<ppp:/echo>",
                            "<wcmatch:<wccase[length(mood) eq 0]:<wcrandom:happy|sad>><wccase:<macro:mood>>>",
                            "Echo command with variant default");
 
             // Echo with wildcard default
-            AssertTransform("<ppp:echo style>__styles__<ppp:/echo>", 
+            AssertTransform("<ppp:echo style>__styles__<ppp:/echo>",
                            "<wcmatch:<wccase[length(style) eq 0]:<wcwildcard:styles>><wccase:<macro:style>>>",
                            "Echo command with wildcard default");
 
             // Multiple echo commands
-            AssertTransform("<ppp:echo color>blue<ppp:/echo> and <ppp:echo size>large<ppp:/echo>", 
+            AssertTransform("<ppp:echo color>blue<ppp:/echo> and <ppp:echo size>large<ppp:/echo>",
                            "<wcmatch:<wccase[length(color) eq 0]:blue><wccase:<macro:color>>> and <wcmatch:<wccase[length(size) eq 0]:large><wccase:<macro:size>>>",
                            "Multiple echo commands");
 
             // Echo with empty default
-            AssertTransform("<ppp:echo color><ppp:/echo>", 
+            AssertTransform("<ppp:echo color><ppp:/echo>",
                            "<macro:color>",
                            "Echo command with empty default");
 
             // Echo with whitespace in default
-            AssertTransform("<ppp:echo color>  bright red  <ppp:/echo>", 
+            AssertTransform("<ppp:echo color>  bright red  <ppp:/echo>",
                            "<wcmatch:<wccase[length(color) eq 0]:  bright red  ><wccase:<macro:color>>>",
                            "Echo command with whitespace in default");
         }
@@ -1375,42 +1375,42 @@ namespace Spoomples.Extensions.WildcardImporter
         private static void TestEchoCommandShortForm()
         {
             // Basic variable reference: ${varname}
-            AssertTransform("${color}", 
+            AssertTransform("${color}",
                            "<macro:color>",
                            "Basic variable reference short form");
 
             // Variable with default: ${varname:default}
-            AssertTransform("${color:red}", 
+            AssertTransform("${color:red}",
                            "<wcmatch:<wccase[length(color) eq 0]:red><wccase:<macro:color>>>",
                            "Variable with default short form");
 
             // Variable with complex default containing variants
-            AssertTransform("${mood:{happy|sad}}", 
+            AssertTransform("${mood:{happy|sad}}",
                            "<wcmatch:<wccase[length(mood) eq 0]:<wcrandom:happy|sad>><wccase:<macro:mood>>>",
                            "Variable with variant default");
 
             // Variable with wildcard default
-            AssertTransform("${style:__styles__}", 
+            AssertTransform("${style:__styles__}",
                            "<wcmatch:<wccase[length(style) eq 0]:<wcwildcard:styles>><wccase:<macro:style>>>",
                            "Variable with wildcard default");
 
             // Multiple variables in text
-            AssertTransform("I like ${color:blue} ${animal:cats}", 
+            AssertTransform("I like ${color:blue} ${animal:cats}",
                            "I like <wcmatch:<wccase[length(color) eq 0]:blue><wccase:<macro:color>>> <wcmatch:<wccase[length(animal) eq 0]:cats><wccase:<macro:animal>>>",
                            "Multiple variables with defaults");
 
             // Variable with empty default
-            AssertTransform("${color:}", 
+            AssertTransform("${color:}",
                            "<macro:color>",
                            "Variable with empty default");
 
             // Variable with colon in default (should handle properly)
-            AssertTransform("${time:12:30}", 
+            AssertTransform("${time:12:30}",
                            "<wcmatch:<wccase[length(time) eq 0]:12:30><wccase:<macro:time>>>",
                            "Variable with colon in default");
 
             // Variable without default mixed with variable with default
-            AssertTransform("${name} likes ${color:blue}", 
+            AssertTransform("${name} likes ${color:blue}",
                            "<macro:name> likes <wcmatch:<wccase[length(color) eq 0]:blue><wccase:<macro:color>>>",
                            "Mixed variables with and without defaults");
         }
@@ -1433,27 +1433,27 @@ namespace Spoomples.Extensions.WildcardImporter
             // Note: We don't test exact output for malformed input, just that it doesn't crash
 
             // Variable reference with multiple colons (should take first as separator)
-            AssertTransform("${var:default:extra}", 
+            AssertTransform("${var:default:extra}",
                            "<wcmatch:<wccase[length(var) eq 0]:default:extra><wccase:<macro:var>>>",
                            "Variable with multiple colons in default");
 
             // Echo command with special characters in variable name
-            AssertTransform("<ppp:echo my_var-123>default<ppp:/echo>", 
+            AssertTransform("<ppp:echo my_var-123>default<ppp:/echo>",
                            "<wcmatch:<wccase[length(my_var-123) eq 0]:default><wccase:<macro:my_var-123>>>",
                            "Echo command with special chars in variable name");
 
             // Variable reference with special characters
-            AssertTransform("${my_var-123:default}", 
+            AssertTransform("${my_var-123:default}",
                            "<wcmatch:<wccase[length(my_var-123) eq 0]:default><wccase:<macro:my_var-123>>>",
                            "Variable reference with special chars");
 
             // Echo with default containing echo syntax (should be processed)
-            AssertTransform("<ppp:echo color>${other:blue}<ppp:/echo>", 
+            AssertTransform("<ppp:echo color>${other:blue}<ppp:/echo>",
                            "<wcmatch:<wccase[length(color) eq 0]:<wcmatch:<wccase[length(other) eq 0]:blue><wccase:<macro:other>>>><wccase:<macro:color>>>",
                            "Echo with default containing variable reference");
 
             // Whitespace handling in long form
-            AssertTransform("<ppp:echo  color  >  default  <ppp:/echo>", 
+            AssertTransform("<ppp:echo  color  >  default  <ppp:/echo>",
                            "<wcmatch:<wccase[length(color) eq 0]:  default  ><wccase:<macro:color>>>",
                            "Echo command with whitespace");
         }
@@ -1465,151 +1465,151 @@ namespace Spoomples.Extensions.WildcardImporter
         private static void TestRecursiveProcessingRegression()
         {
             // Test variants with nested variables
-            AssertTransform("{${color}|blue} car", 
+            AssertTransform("{${color}|blue} car",
                            "<wcrandom:<macro:color>|blue> car",
                            "Variant with variable in option");
-            
-            AssertTransform("{red|${color}|green} palette", 
+
+            AssertTransform("{red|${color}|green} palette",
                            "<wcrandom:red|<macro:color>|green> palette",
                            "Variant with variable in middle option");
-            
-            AssertTransform("{${primary}|${secondary}} colors", 
+
+            AssertTransform("{${primary}|${secondary}} colors",
                            "<wcrandom:<macro:primary>|<macro:secondary>> colors",
                            "Variant with variables in multiple options");
-            
+
             // Test variants with nested wildcards
-            AssertTransform("{__colors__|blue} theme", 
+            AssertTransform("{__colors__|blue} theme",
                            "<wcrandom:<wcwildcard:colors>|blue> theme",
                            "Variant with wildcard in option");
-            
-            AssertTransform("{red|__colors__|green} palette", 
+
+            AssertTransform("{red|__colors__|green} palette",
                            "<wcrandom:red|<wcwildcard:colors>|green> palette",
                            "Variant with wildcard in middle option");
-            
+
             // Test variants with nested variants
-            AssertTransform("{red|{light|dark} blue} colors", 
+            AssertTransform("{red|{light|dark} blue} colors",
                            "<wcrandom:red|<wcrandom:light|dark> blue> colors",
                            "Variant with nested variant in option");
-            
+
             // Test wildcards with nested variables
-            AssertTransform("__scenes/${scene}/clothed_state__ outfit", 
+            AssertTransform("__scenes/${scene}/clothed_state__ outfit",
                            "<wcwildcard:scenes/<macro:scene>/clothed_state> outfit",
                            "Wildcard with variable in path");
-            
-            AssertTransform("__${category}/${subcategory}__ items", 
+
+            AssertTransform("__${category}/${subcategory}__ items",
                            "<wcwildcard:<macro:category>/<macro:subcategory>> items",
                            "Wildcard with multiple variables in path");
-            
+
             // Test wildcards with nested variants
-            AssertTransform("__{red|blue}_colors__ theme", 
+            AssertTransform("__{red|blue}_colors__ theme",
                            "<wcwildcard:<wcrandom:red|blue>_colors> theme",
                            "Wildcard with variant in path");
-            
+
             // Test prompt editing with nested variables
-            AssertTransform("[${from_color}:${to_color}:5] transition", 
+            AssertTransform("[${from_color}:${to_color}:5] transition",
                            "<fromto[5]:<macro:from_color>||<macro:to_color>> transition",
                            "Prompt editing with variables in from/to");
-            
+
             // Test prompt editing with nested variants
-            AssertTransform("[{red|blue}:{green|yellow}:3] gradient", 
+            AssertTransform("[{red|blue}:{green|yellow}:3] gradient",
                            "<fromto[3]:<wcrandom:red|blue>||<wcrandom:green|yellow>> gradient",
                            "Prompt editing with variants in from/to");
-            
+
             // Test prompt editing with nested wildcards
-            AssertTransform("[__start_colors__:__end_colors__:2] fade", 
+            AssertTransform("[__start_colors__:__end_colors__:2] fade",
                            "<fromto[2]:<wcwildcard:start_colors>||<wcwildcard:end_colors>> fade",
                            "Prompt editing with wildcards in from/to");
-            
+
             // Test alternating words with nested variables
-            AssertTransform("[${animal1}|${animal2}] in field", 
+            AssertTransform("[${animal1}|${animal2}] in field",
                            "<alternate:<macro:animal1>||<macro:animal2>> in field",
                            "Alternating words with variables");
-            
+
             // Test alternating words with nested variants
-            AssertTransform("[{red|crimson}|{blue|navy}] colors", 
+            AssertTransform("[{red|crimson}|{blue|navy}] colors",
                            "<alternate:<wcrandom:red|crimson>||<wcrandom:blue|navy>> colors",
                            "Alternating words with variants");
-            
+
             // Test alternating words with nested wildcards
-            AssertTransform("[__animals__|__plants__] nature", 
+            AssertTransform("[__animals__|__plants__] nature",
                            "<alternate:<wcwildcard:animals>||<wcwildcard:plants>> nature",
                            "Alternating words with wildcards");
-            
+
             // Test complex multi-level nesting
-            AssertTransform("{${color}|{light|dark} {red|blue}} theme", 
+            AssertTransform("{${color}|{light|dark} {red|blue}} theme",
                            "<wcrandom:<macro:color>|<wcrandom:light|dark> <wcrandom:red|blue>> theme",
                            "Complex multi-level variant nesting");
-            
-            AssertTransform("__scenes/${scene}/{${mood}|happy}__ setting", 
+
+            AssertTransform("__scenes/${scene}/{${mood}|happy}__ setting",
                            "<wcwildcard:scenes/<macro:scene>/<wcrandom:<macro:mood>|happy>> setting",
                            "Complex wildcard with variable and variant");
-            
+
             // Test quantified variants with nested content
-            AssertTransform("{2$$${color1}|${color2}|blue} palette", 
+            AssertTransform("{2$$${color1}|${color2}|blue} palette",
                            "<wcrandom[2,]:<macro:color1>|<macro:color2>|blue> palette",
                            "Quantified variant with variables");
-            
-            AssertTransform("{3$$__colors__|{red|green}|blue} mix", 
+
+            AssertTransform("{3$$__colors__|{red|green}|blue} mix",
                            "<wcrandom[3,]:<wcwildcard:colors>|<wcrandom:red|green>|blue> mix",
                            "Quantified variant with wildcard and nested variant");
-            
+
             // Test range variants with nested content
-            AssertTransform("{2-3$$${primary}|${secondary}|neutral} scheme", 
+            AssertTransform("{2-3$$${primary}|${secondary}|neutral} scheme",
                            "<wcrandom[2-3,]:<macro:primary>|<macro:secondary>|neutral> scheme",
                            "Range variant with variables");
-            
+
             // Test the original failing case that started this fix
-            AssertTransform("${clothed_state=__scenes/${scene}/clothed_state__}", 
+            AssertTransform("${clothed_state=__scenes/${scene}/clothed_state__}",
                            "<setmacro[clothed_state,false]:<wcwildcard:scenes/<macro:scene>/clothed_state>>",
                            "wildcard with variable inside setvar");
-            
+
             // Test variable assignments with complex nested content
-            AssertTransform("${style={modern|__historical/${period}__}} building", 
+            AssertTransform("${style={modern|__historical/${period}__}} building",
                            "<setmacro[style,false]:<wcrandom:modern|<wcwildcard:historical/<macro:period>>>> building",
                            "Variable assignment with variant containing wildcard with variable");
-            
+
             // Test immediate variable assignments with nested content
-            AssertTransform("${color=!{${primary}|${secondary}}} ${color} theme", 
+            AssertTransform("${color=!{${primary}|${secondary}}} ${color} theme",
                            "<setvar[color,false]:<wcrandom:<macro:primary>|<macro:secondary>>><setmacro[color,false]:<var:color>> <macro:color> theme",
                            "Immediate variable assignment with variant containing variables");
-            
+
             // Test deeply nested structures
-            AssertTransform("{${outer}|{${inner1}|{${deep}|literal}}} test", 
+            AssertTransform("{${outer}|{${inner1}|{${deep}|literal}}} test",
                            "<wcrandom:<macro:outer>|<wcrandom:<macro:inner1>|<wcrandom:<macro:deep>|literal>>> test",
                            "Deeply nested variants with variables");
-            
+
             // Test mixed constructs in complex scenarios
-            AssertTransform("[{${from_style}|modern}:{${to_style}|classic}:${steps}] and [{${animal1}|cat}|{${animal2}|dog}] scene", 
+            AssertTransform("[{${from_style}|modern}:{${to_style}|classic}:${steps}] and [{${animal1}|cat}|{${animal2}|dog}] scene",
                            "<fromto[<macro:steps>]:<wcrandom:<macro:from_style>|modern>||<wcrandom:<macro:to_style>|classic>> and <alternate:<wcrandom:<macro:animal1>|cat>||<wcrandom:<macro:animal2>|dog>> scene",
                            "Complex mixed constructs with variables and variants");
-            
+
             // Test negative attention with nested variables
-            AssertTransform("[${color} car] in scene", 
+            AssertTransform("[${color} car] in scene",
                            "(<macro:color> car:0.9) in scene",
                            "Negative attention with variable");
-            
+
             // Test negative attention with nested variants
-            AssertTransform("[{red|blue} car] in garage", 
+            AssertTransform("[{red|blue} car] in garage",
                            "(<wcrandom:red|blue> car:0.9) in garage",
                            "Negative attention with variant");
-            
+
             // Test negative attention with nested wildcards
-            AssertTransform("[__colors__ theme] design", 
+            AssertTransform("[__colors__ theme] design",
                            "(<wcwildcard:colors> theme:0.9) design",
                            "Negative attention with wildcard");
-            
+
             // Test nested negative attention with complex content
-            AssertTransform("[{${primary}|__colors__} and ${secondary}] palette", 
+            AssertTransform("[{${primary}|__colors__} and ${secondary}] palette",
                            "(<wcrandom:<macro:primary>|<wcwildcard:colors>> and <macro:secondary>:0.9) palette",
                            "Negative attention with mixed nested constructs");
-            
+
             // Test multiple levels of negative attention
-            AssertTransform("[[${inner}] outer] content", 
+            AssertTransform("[[${inner}] outer] content",
                            "((<macro:inner>:0.9) outer:0.9) content",
                            "Nested negative attention with variable");
-            
+
             // Test negative attention with variable assignments
-            AssertTransform("[${style={modern|classic}} building] architecture", 
+            AssertTransform("[${style={modern|classic}} building] architecture",
                            "(<setmacro[style,false]:<wcrandom:modern|classic>> building:0.9) architecture",
                            "Negative attention with variable assignment containing variant");
         }
@@ -1618,7 +1618,7 @@ namespace Spoomples.Extensions.WildcardImporter
 
         #region Helper Methods
 
-        private static void AssertTransform(string input, string expected, string testName, 
+        private static void AssertTransform(string input, string expected, string testName,
                                           ConcurrentDictionary<string, List<string>> mockFiles = null)
         {
             try
@@ -1626,7 +1626,7 @@ namespace Spoomples.Extensions.WildcardImporter
                 var processor = CreateTestProcessor(mockFiles);
                 string taskId = "test-task";
                 var task = new ProcessingTask { Id = taskId, Prefix = "" };
-                
+
                 // Set up mock files in the task if provided
                 if (mockFiles != null)
                 {
@@ -1634,20 +1634,20 @@ namespace Spoomples.Extensions.WildcardImporter
                 }
 
                 // Use reflection to access private _tasks field and set it up
-                var tasksField = processor.GetType().GetField("_tasks", 
+                var tasksField = processor.GetType().GetField("_tasks",
                     System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
                 var tasks = new ConcurrentDictionary<string, ProcessingTask> { [taskId] = task };
                 tasksField?.SetValue(processor, tasks);
 
                 // Use reflection to call private ProcessWildcardLine method
-                var method = processor.GetType().GetMethod("ProcessWildcardLine", 
+                var method = processor.GetType().GetMethod("ProcessWildcardLine",
                     System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-                
+
                 if (method == null)
                 {
                     throw new Exception("ProcessWildcardLine method not found");
                 }
-                
+
                 string result = (string)method.Invoke(processor, new object[] { input, taskId });
 
                 if (result == expected)
@@ -1676,21 +1676,21 @@ namespace Spoomples.Extensions.WildcardImporter
         {
             // Get the extension folder path for YamlParser initialization
             string extensionFolder = System.IO.Path.GetDirectoryName(typeof(WildcardProcessorTest).Assembly.Location) ?? "";
-            var yamlParser = new YamlParser(extensionFolder);
+            var yamlParser = new YamlParser();
             var processor = new WildcardProcessor(yamlParser);
-            
+
             // If mock files provided, inject them into a test task
             if (mockFiles != null)
             {
                 var task = new ProcessingTask { Id = "test-task", Prefix = "" };
                 task.InMemoryFiles = mockFiles;
-                
-                var tasksField = processor.GetType().GetField("_tasks", 
+
+                var tasksField = processor.GetType().GetField("_tasks",
                     System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
                 var tasks = new ConcurrentDictionary<string, ProcessingTask> { ["test-task"] = task };
                 tasksField?.SetValue(processor, tasks);
             }
-            
+
             return processor;
         }
 
