@@ -1816,7 +1816,7 @@ namespace Spoomples.Extensions.WildcardImporter
                 // Add push variables and push macros for each variable (in order)
                 foreach (var (varName, varValue) in variableOverrides)
                 {
-                    result += $"<wcpushvar[{varName}]:{varValue}><wcpushmacro[{varName}]:<var:{varName}>>";
+                    result += $"<wcpushvar[{varName}]:{EncodeValueIfNeeded(varValue)}><wcpushmacro[{varName}]:<var:{varName}>>";
                 }
 
                 // Add the base wildcard result
@@ -1832,6 +1832,34 @@ namespace Spoomples.Extensions.WildcardImporter
             }
 
             return baseResult;
+        }
+
+        /// <summary>
+        /// Wraps a wildcard argument value in a &lt;wcbase64&gt; directive when it contains a
+        /// literal '&lt;' or '&gt;'.
+        /// <para>
+        /// SwarmUI's prompt parser scans tags with a plain '&lt;'..'&gt;' delimiter scanner that has
+        /// no escape mechanism, so an angle bracket inside a tag value corrupts the surrounding
+        /// tags: a '&gt;' closes the tag early, a '&lt;' stops it closing. Booru emoticon tags
+        /// (";&lt;", ":&gt;", "&gt;_o", ...) are exactly that shape. Encoding the value keeps the
+        /// emitted tag well formed; &lt;wcbase64&gt; decodes it back before it is stored, so the
+        /// variable holds the real text.
+        /// </para>
+        /// <para>
+        /// The encoding is deliberately conditional. Values without angle brackets are emitted
+        /// as-is, both to keep the generated wildcard files readable and because a value may
+        /// legitimately contain source syntax that later transform stages still need to see.
+        /// The value is encoded exactly as it stands, escapes included, so an escaped booru tag
+        /// round trips byte for byte.
+        /// </para>
+        /// </summary>
+        private static string EncodeValueIfNeeded(string value)
+        {
+            if (value is null || (!value.Contains('<') && !value.Contains('>')))
+            {
+                return value;
+            }
+            return $"<wcbase64:{Convert.ToBase64String(Encoding.UTF8.GetBytes(value))}>";
         }
 
         /// <summary>

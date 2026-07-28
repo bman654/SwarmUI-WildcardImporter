@@ -48,6 +48,7 @@ namespace Spoomples.Extensions.WildcardImporter
             TestVariableOverrides();
             TestAngleBracketsInWildcardArgs();
             TestEscapedParensInWildcardArgs();
+            TestEmoticonArgumentEncoding();
 
             // Test label filtering
             TestLabelFiltering();
@@ -571,23 +572,22 @@ namespace Spoomples.Extensions.WildcardImporter
         /// emoticon tags such as ";&lt;" or "&gt;_o"). Angle brackets are not nesting delimiters
         /// for the "__...__" span scanner, so these must transform like any other argument
         /// instead of being left in the file verbatim.
-        /// Values carrying a '&gt;' need the emission-time encoding step as well (a raw '&gt;'
-        /// closes the emitted tag early for the later transform stages), so they are asserted
-        /// alongside that step rather than here.
         /// </summary>
         private static void TestAngleBracketsInWildcardArgs()
         {
+            // The value itself is base64-encoded on the way out (see TestEmoticonArgumentEncoding);
+            // what matters here is that the span is found at all and a wildcard reference results.
             AssertTransform("__u(q=;<)__ face",
-                           "<wcpushvar[q]:;<><wcpushmacro[q]:<var:q>><wcwildcard:u><wcpopmacro:q><wcpopvar:q> face",
+                           "<wcpushvar[q]:<wcbase64:Ozw=>><wcpushmacro[q]:<var:q>><wcwildcard:u><wcpopmacro:q><wcpopvar:q> face",
                            "Wildcard arg with trailing '<'");
 
             AssertTransform("__u(q=:<)__ face",
-                           "<wcpushvar[q]::<><wcpushmacro[q]:<var:q>><wcwildcard:u><wcpopmacro:q><wcpopvar:q> face",
+                           "<wcpushvar[q]:<wcbase64:Ojw=>><wcpushmacro[q]:<var:q>><wcwildcard:u><wcpopmacro:q><wcpopvar:q> face",
                            "Wildcard arg with unbalanced '<'");
 
             // Balanced angles always worked (the counter returned to zero); keep them covered.
             AssertTransform("__u(q=>_<)__ face",
-                           "<wcpushvar[q]:>_<><wcpushmacro[q]:<var:q>><wcwildcard:u><wcpopmacro:q><wcpopvar:q> face",
+                           "<wcpushvar[q]:<wcbase64:Pl88>><wcpushmacro[q]:<var:q>><wcwildcard:u><wcpopmacro:q><wcpopvar:q> face",
                            "Wildcard arg with balanced angles");
 
             // A '<' anywhere else on the line must not hide a later wildcard reference either.
@@ -633,6 +633,59 @@ namespace Spoomples.Extensions.WildcardImporter
             AssertTransform("__u(q=happy (very) face)__ now",
                            "<wcpushvar[q]:happy (very) face><wcpushmacro[q]:<var:q>><wcwildcard:u><wcpopmacro:q><wcpopvar:q> now",
                            "Wildcard arg with unescaped nested parens");
+        }
+
+        /// <summary>
+        /// A wildcard argument value containing a literal '&lt;' or '&gt;' is base64-encoded at
+        /// emission time, because SwarmUI's tag scanner has no escape mechanism and would
+        /// otherwise mis-terminate the emitted tags. The encoding is conditional: values without
+        /// angle brackets are emitted verbatim.
+        /// This is the full table of emoticon expression tags that motivated the fix.
+        /// </summary>
+        private static void TestEmoticonArgumentEncoding()
+        {
+            void AssertEmoticon(string value, string payload)
+            {
+                AssertTransform($"__u(q={value})__ face",
+                               $"<wcpushvar[q]:<wcbase64:{payload}>><wcpushmacro[q]:<var:q>><wcwildcard:u><wcpopmacro:q><wcpopvar:q> face",
+                               $"Emoticon arg '{value}' is encoded");
+            }
+
+            AssertEmoticon(";<", "Ozw=");
+            AssertEmoticon(":<", "Ojw=");
+            AssertEmoticon(":>", "Oj4=");
+            AssertEmoticon(":>=", "Oj49");
+            AssertEmoticon(">_<", "Pl88");
+            AssertEmoticon(">_o", "Pl9v");
+            // Angle brackets AND an escaped paren: the payload encodes the ESCAPED text, so the
+            // backslash round trips.
+            AssertEmoticon(">:\\(", "PjpcKA==");
+            AssertEmoticon(">:\\)", "PjpcKQ==");
+
+            // No angle brackets, so no encoding - these two are repaired by the paren matcher fix
+            // alone, and they must stay readable in the generated wildcard file.
+            AssertTransform("__u(q=;\\()__ face",
+                           "<wcpushvar[q]:;\\(><wcpushmacro[q]:<var:q>><wcwildcard:u><wcpopmacro:q><wcpopvar:q> face",
+                           "Emoticon arg ';\\(' is not encoded");
+
+            AssertTransform("__u(q=;\\))__ face",
+                           "<wcpushvar[q]:;\\)><wcpushmacro[q]:<var:q>><wcwildcard:u><wcpopmacro:q><wcpopvar:q> face",
+                           "Emoticon arg ';\\)' is not encoded");
+
+            // Ordinary values are never encoded - blanket encoding would make the generated
+            // wildcard files unreadable for the thousands of healthy values.
+            AssertTransform("__u(q=;d)__ face",
+                           "<wcpushvar[q]:;d><wcpushmacro[q]:<var:q>><wcwildcard:u><wcpopmacro:q><wcpopvar:q> face",
+                           "Plain arg is not encoded");
+
+            AssertTransform("__u(q=night elf \\(warcraft\\))__ face",
+                           "<wcpushvar[q]:night elf \\(warcraft\\)><wcpushmacro[q]:<var:q>><wcwildcard:u><wcpopmacro:q><wcpopvar:q> face",
+                           "Escaped booru tag is not encoded and keeps its backslashes");
+
+            // Multiple overrides: each value is judged on its own.
+            AssertTransform("__u(q=:>)__ and __u(q=happy)__",
+                           "<wcpushvar[q]:<wcbase64:Oj4=>><wcpushmacro[q]:<var:q>><wcwildcard:u><wcpopmacro:q><wcpopvar:q> and <wcpushvar[q]:happy><wcpushmacro[q]:<var:q>><wcwildcard:u><wcpopmacro:q><wcpopvar:q>",
+                           "Encoding is decided per value");
         }
 
         private static void TestLabelFiltering()
