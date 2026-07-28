@@ -79,6 +79,7 @@ namespace Spoomples.Extensions.WildcardImporter
             Match();
             EnhancedRandom();
             EnhancedWildcard();
+            Base64();
         }
 
         public static (int, string) InterpretPredataForRandom(string prefix, string preData, string data, T2IPromptHandling.PromptTagContext context)
@@ -373,6 +374,58 @@ namespace Spoomples.Extensions.WildcardImporter
                 }
                 return longestStr;
             };
+        }
+
+        /// <summary>
+        /// Decodes a base64 payload, or returns null if it is not valid base64.
+        /// </summary>
+        public static string DecodeBase64(string data)
+        {
+            if (string.IsNullOrEmpty(data))
+            {
+                return "";
+            }
+            try
+            {
+                return System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(data));
+            }
+            catch (FormatException)
+            {
+                return null;
+            }
+        }
+
+        private static void Base64()
+        {
+            /*
+             * <wcbase64:BASE64TEXT>  ->  the decoded text
+             *
+             * SwarmUI's prompt parser scans tags with a plain '<'..'>' delimiter scanner that has
+             * no escape mechanism, so a literal '<' or '>' cannot be carried inside a tag value:
+             * the '>' closes the tag early and the '<' stops it closing. This directive is the way
+             * to carry such a value (the booru emoticon tags ";<", ":>", ">_o", ...).
+             *
+             * Registered in the POST processors (the last of the three parse passes) on purpose:
+             * text emitted during a pass is never re-scanned by that same pass, and no pass runs
+             * after this one, so a '<' this directive emits at the top level is completely inert.
+             * Nested use still works, because a value's tags are expanded by context.Parse, which
+             * runs all three passes over the fragment - which is also why <wcpushvar[q]:<wcbase64:
+             * ...>> puts the DECODED text into the variable, so Mages conditions test the real
+             * value rather than an encoded one.
+             */
+            T2IPromptHandling.PromptTagPostProcessors["wcbase64"] = (data, context) =>
+            {
+                string decoded = DecodeBase64(data);
+                if (decoded is null)
+                {
+                    context.TrackWarning($"Base64 input '{data}' is not valid base64 and will be ignored.");
+                    return "";
+                }
+                return decoded;
+            };
+            // NOTE: no TrackWarning here - the length-estimation pass runs on a context with no
+            // Input attached, so warnings must not be tracked through it.
+            T2IPromptHandling.PromptTagLengthEstimators["wcbase64"] = (data, context) => DecodeBase64(data) ?? "";
         }
 
         private static void AddNegativePrompt()

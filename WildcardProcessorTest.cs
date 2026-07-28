@@ -99,6 +99,9 @@ namespace Spoomples.Extensions.WildcardImporter
             // Test recursive processing regression tests
             TestRecursiveProcessingRegression();
 
+            // Test the base64 directive used to carry angle brackets
+            TestBase64Directive();
+
             // Test BREAK word replacement
             TestBreakWordReplacement();
             TestBreakWordProtectedContexts();
@@ -1687,7 +1690,58 @@ namespace Spoomples.Extensions.WildcardImporter
 
         #endregion
 
+        #region Test Base64 Directive
+
+        /// <summary>
+        /// The &lt;wcbase64&gt; directive is how a value containing a literal '&lt;' or '&gt;'
+        /// reaches the prompt, since SwarmUI's tag scanner has no escape mechanism. Every payload
+        /// the transform emits must decode back to the exact original text, backslashes included.
+        /// </summary>
+        private static void TestBase64Directive()
+        {
+            // The ten emoticon values that need it, and the payloads the transform emits for them.
+            AssertEquals(PromptDirectives.DecodeBase64("Ozw="), ";<", "Base64 decode ';<'");
+            AssertEquals(PromptDirectives.DecodeBase64("Ojw="), ":<", "Base64 decode ':<'");
+            AssertEquals(PromptDirectives.DecodeBase64("Oj4="), ":>", "Base64 decode ':>'");
+            AssertEquals(PromptDirectives.DecodeBase64("Oj49"), ":>=", "Base64 decode ':>='");
+            AssertEquals(PromptDirectives.DecodeBase64("Pl88"), ">_<", "Base64 decode '>_<'");
+            AssertEquals(PromptDirectives.DecodeBase64("Pl9v"), ">_o", "Base64 decode '>_o'");
+            AssertEquals(PromptDirectives.DecodeBase64("O1wo"), ";\\(", "Base64 decode ';\\('");
+            AssertEquals(PromptDirectives.DecodeBase64("O1wp"), ";\\)", "Base64 decode ';\\)'");
+            AssertEquals(PromptDirectives.DecodeBase64("PjpcKA=="), ">:\\(", "Base64 decode '>:\\('");
+            AssertEquals(PromptDirectives.DecodeBase64("PjpcKQ=="), ">:\\)", "Base64 decode '>:\\)'");
+
+            // Round trip of an escaped booru tag - the backslash must come back out.
+            string tag = "night elf \\(warcraft\\)";
+            string encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(tag));
+            AssertEquals(PromptDirectives.DecodeBase64(encoded), tag, "Base64 round trip keeps backslashes");
+
+            // Empty payload is empty text, not a failure.
+            AssertEquals(PromptDirectives.DecodeBase64(""), "", "Base64 decode of empty payload");
+
+            // A bad payload reports failure (null) so the directive can warn instead of throwing.
+            AssertEquals(PromptDirectives.DecodeBase64("not base64!"), null, "Base64 decode of invalid payload");
+        }
+
+        #endregion
+
         #region Helper Methods
+
+        private static void AssertEquals(string actual, string expected, string testName)
+        {
+            if (actual == expected)
+            {
+                _testsPassed++;
+                Logs.Debug($"✓ {testName}: PASSED");
+            }
+            else
+            {
+                _testsFailed++;
+                string message = $"{testName}: Expected '{expected ?? "<null>"}', got '{actual ?? "<null>"}'";
+                _failureMessages.Add(message);
+                Logs.Error($"✗ {message}");
+            }
+        }
 
         private static void AssertTransform(string input, string expected, string testName,
                                           ConcurrentDictionary<string, List<string>> mockFiles = null)
