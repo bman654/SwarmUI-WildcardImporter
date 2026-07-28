@@ -47,6 +47,7 @@ namespace Spoomples.Extensions.WildcardImporter
             TestAdvancedWildcardOptions();
             TestVariableOverrides();
             TestAngleBracketsInWildcardArgs();
+            TestEscapedParensInWildcardArgs();
 
             // Test label filtering
             TestLabelFiltering();
@@ -590,6 +591,45 @@ namespace Spoomples.Extensions.WildcardImporter
             AssertTransform("mood :< and __colors__",
                            "mood :< and <wcwildcard:colors>",
                            "Stray '<' before a plain wildcard reference");
+        }
+
+        /// <summary>
+        /// Wildcard argument values carry escaped parentheses: disambiguated booru tags such as
+        /// "night elf \(warcraft\)" and emoticon tags such as ";\)". The backwards paren matcher
+        /// that splits "name(args)" must skip escaped parens when finding the opening paren --
+        /// and must leave the backslash in the value, because ComfyUI parses bare parens as an
+        /// emphasis group.
+        /// </summary>
+        private static void TestEscapedParensInWildcardArgs()
+        {
+            // Unbalanced escaped parens: the whole reference used to become a wildcard NAME.
+            AssertTransform("__u(q=;\\()__ face",
+                           "<wcpushvar[q]:;\\(><wcpushmacro[q]:<var:q>><wcwildcard:u><wcpopmacro:q><wcpopvar:q> face",
+                           "Wildcard arg with unbalanced escaped open paren");
+
+            AssertTransform("__u(q=;\\))__ face",
+                           "<wcpushvar[q]:;\\)><wcpushmacro[q]:<var:q>><wcwildcard:u><wcpopmacro:q><wcpopvar:q> face",
+                           "Wildcard arg with unbalanced escaped close paren");
+
+            // Balanced escaped parens worked before (the miscounts cancelled) and must keep
+            // working -- these are the disambiguated booru tags. THE BACKSLASH MUST SURVIVE:
+            // a bare "night elf (warcraft)" reaching ComfyUI becomes an emphasis group.
+            AssertTransform("__u(q=night elf \\(warcraft\\))__ face",
+                           "<wcpushvar[q]:night elf \\(warcraft\\)><wcpushmacro[q]:<var:q>><wcwildcard:u><wcpopmacro:q><wcpopvar:q> face",
+                           "Wildcard arg with balanced escaped parens keeps its backslashes");
+
+            AssertTransform("__u(q=plug \\(piercing\\))__ face",
+                           "<wcpushvar[q]:plug \\(piercing\\)><wcpushmacro[q]:<var:q>><wcwildcard:u><wcpopmacro:q><wcpopvar:q> face",
+                           "Disambiguated booru tag 'plug \\(piercing\\)' keeps its backslashes");
+
+            AssertTransform("__u(q=snakebite \\(piercing\\))__ face",
+                           "<wcpushvar[q]:snakebite \\(piercing\\)><wcpushmacro[q]:<var:q>><wcwildcard:u><wcpopmacro:q><wcpopvar:q> face",
+                           "Disambiguated booru tag 'snakebite \\(piercing\\)' keeps its backslashes");
+
+            // Unescaped parens inside a value are still real nesting, not content.
+            AssertTransform("__u(q=happy (very) face)__ now",
+                           "<wcpushvar[q]:happy (very) face><wcpushmacro[q]:<var:q>><wcwildcard:u><wcpopmacro:q><wcpopvar:q> now",
+                           "Wildcard arg with unescaped nested parens");
         }
 
         private static void TestLabelFiltering()

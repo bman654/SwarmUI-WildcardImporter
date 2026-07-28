@@ -1593,6 +1593,20 @@ namespace Spoomples.Extensions.WildcardImporter
 
                 for (int i = content.Length - 1; i >= 0; i--)
                 {
+                    // An escaped paren is literal content, not structure, so it must not move the
+                    // nesting count. Booru tags routinely carry them ("plug \(piercing\)") and so
+                    // do emoticon tags (";\)"); the balanced ones only worked because the two
+                    // miscounts cancelled, while an unbalanced one made the whole "name(args)"
+                    // string get treated as a wildcard name. FindTopLevelChar already skips
+                    // escaped characters the same way.
+                    //
+                    // IMPORTANT: this is BOUNDARY DETECTION ONLY - it must never unescape.
+                    // We skip over the escaped character when deciding where the argument list
+                    // begins; the backslash stays in the value that is handed to
+                    // ParseVariableAssignments and emitted into the wildcard file. Consuming it
+                    // here would silently turn every disambiguated booru tag into a ComfyUI
+                    // emphasis group -- a corruption with no error message.
+                    if (i > 0 && content[i - 1] == '\\') { continue; }
                     if (content[i] == ')')
                     {
                         parenCount++;
