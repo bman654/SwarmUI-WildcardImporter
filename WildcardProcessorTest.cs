@@ -813,13 +813,13 @@ namespace Spoomples.Extensions.WildcardImporter
         private static void TestIfConditions()
         {
             AssertTransform(" if foo not in (\"a\",\"b\", bar) :: value",
-                " if foo ne \"a\" and foo ne \"b\" and foo ne bar:: value",
+                " if (foo ne \"a\" and foo ne \"b\" and foo ne bar):: value",
                 "if condition with not in clause");
             AssertTransform(" if foo not in (\"a\",\"b\", bar) : value",
                 " if foo not in (\"a\",\"b\", bar) : value",
                 "if condition not processed if no ::");
             AssertTransform("{a| if foo not in (\"a\",\"b\", bar) :: value|2 if foo eq \"apple\"::value2}",
-                "<wcrandom:a|if foo ne \"a\" and foo ne \"b\" and foo ne bar:: value|2 if foo eq \"apple\"::value2>",
+                "<wcrandom:a|if (foo ne \"a\" and foo ne \"b\" and foo ne bar):: value|2 if foo eq \"apple\"::value2>",
                 "if condition inside variant processed");
         }
 
@@ -2096,27 +2096,29 @@ namespace Spoomples.Extensions.WildcardImporter
         {
             // Contains operation with list (variables)
             AssertTransform("<ppp:if myvar contains (val1,val2,val3)>found<ppp:/if>",
-                           "<wcmatch:<wccase[contains(myvar, val1) or contains(myvar, val2) or contains(myvar, val3)]:found>>",
+                           "<wcmatch:<wccase[(contains(myvar, val1) or contains(myvar, val2) or contains(myvar, val3))]:found>>",
                            "If with contains list operation");
 
             // In operation with list (variables)
             AssertTransform("<ppp:if myvar in (option1,option2,option3)>in list<ppp:/if>",
-                           "<wcmatch:<wccase[myvar eq option1 or myvar eq option2 or myvar eq option3]:in list>>",
+                           "<wcmatch:<wccase[(myvar eq option1 or myvar eq option2 or myvar eq option3)]:in list>>",
                            "If with in list operation");
 
-            // Single value in parentheses (should be treated as single value)
+            // Single value in parentheses. Only "in" and "contains" take a list operand, so an
+            // "eq" operand is passed through untouched - the parentheses are simply a grouped
+            // sub-expression to the expression engine, so "(singleval)" evaluates as "singleval".
             AssertTransform("<ppp:if myvar eq (singleval)>single<ppp:/if>",
-                           "<wcmatch:<wccase[myvar eq singleval]:single>>",
+                           "<wcmatch:<wccase[myvar eq (singleval)]:single>>",
                            "If with single value in parentheses");
 
             // Mixed quoted and unquoted values in list
             AssertTransform("<ppp:if myvar contains (var1,\"literal\",var2)>mixed<ppp:/if>",
-                           "<wcmatch:<wccase[contains(myvar, var1) or contains(myvar, \"literal\") or contains(myvar, var2)]:mixed>>",
+                           "<wcmatch:<wccase[(contains(myvar, var1) or contains(myvar, \"literal\") or contains(myvar, var2))]:mixed>>",
                            "If with mixed quoted and unquoted values");
 
             // All quoted values in list
             AssertTransform("<ppp:if myvar in (\"opt1\",\"opt2\",\"opt3\")>all quoted<ppp:/if>",
-                           "<wcmatch:<wccase[myvar eq \"opt1\" or myvar eq \"opt2\" or myvar eq \"opt3\"]:all quoted>>",
+                           "<wcmatch:<wccase[(myvar eq \"opt1\" or myvar eq \"opt2\" or myvar eq \"opt3\")]:all quoted>>",
                            "If with all quoted values");
         }
 
@@ -2134,7 +2136,7 @@ namespace Spoomples.Extensions.WildcardImporter
 
             // Not with list operation
             AssertTransform("<ppp:if myvar not in (val1,val2)>not in list<ppp:/if>",
-                           "<wcmatch:<wccase[myvar ne val1 and myvar ne val2]:not in list>>",
+                           "<wcmatch:<wccase[(myvar ne val1 and myvar ne val2)]:not in list>>",
                            "If with not in list");
 
             // Not with greater than
@@ -2193,9 +2195,10 @@ namespace Spoomples.Extensions.WildcardImporter
                            "<ppp:if>content<ppp:/if>",
                            "If with empty condition");
 
-            // Whitespace handling
+            // Whitespace handling. The condition is trimmed at both ends; whitespace inside it is
+            // left as written, since the expression engine tokenises it the same either way.
             AssertTransform("<ppp:if   myvar   eq   \"test\"  >content<ppp:/if>",
-                           "<wcmatch:<wccase[myvar eq \"test\"]:content>>",
+                           "<wcmatch:<wccase[myvar   eq   \"test\"]:content>>",
                            "If with extra whitespace");
 
             // Case insensitive operations
