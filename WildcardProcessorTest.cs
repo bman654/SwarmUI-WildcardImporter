@@ -2000,6 +2000,60 @@ namespace Spoomples.Extensions.WildcardImporter
             }
         }
 
+        /// <summary>
+        /// Like <see cref="AssertTransform"/>, but also requires the transform to have raised an
+        /// import warning containing <paramref name="expectedWarning"/>. Import warnings are the
+        /// ones surfaced by the WildcardImporter UI (ProcessingTask.Warnings), as distinct from the
+        /// generation-time warnings a prompt directive tracks.
+        /// </summary>
+        private static void AssertTransformWarns(string input, string expected, string expectedWarning, string testName)
+        {
+            try
+            {
+                var processor = CreateTestProcessor();
+                string taskId = "test-task";
+                var task = new ProcessingTask { Id = taskId, Prefix = "" };
+
+                var tasksField = processor.GetType().GetField("_tasks",
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                var tasks = new ConcurrentDictionary<string, ProcessingTask> { [taskId] = task };
+                tasksField?.SetValue(processor, tasks);
+
+                var method = processor.GetType().GetMethod("ProcessWildcardLine",
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+                if (method == null)
+                {
+                    throw new Exception("ProcessWildcardLine method not found");
+                }
+
+                string result = (string)method.Invoke(processor, new object[] { input, taskId });
+                bool warned = task.Warnings.Any(w => w.Contains(expectedWarning, StringComparison.Ordinal));
+
+                if (result == expected && warned)
+                {
+                    _testsPassed++;
+                    Logs.Debug($"✓ {testName}: PASSED");
+                }
+                else
+                {
+                    _testsFailed++;
+                    string problem = result != expected
+                        ? $"Expected '{expected}', got '{result}'"
+                        : $"Expected a warning containing '{expectedWarning}', got [{string.Join(" | ", task.Warnings)}]";
+                    _failureMessages.Add($"{testName}: {problem}");
+                    Logs.Error($"✗ {testName}: {problem}");
+                }
+            }
+            catch (Exception ex)
+            {
+                _testsFailed++;
+                string message = $"{testName}: Exception - {ex.Message}";
+                _failureMessages.Add(message);
+                Logs.Error($"✗ {message}");
+            }
+        }
+
         private static WildcardProcessor CreateTestProcessor(ConcurrentDictionary<string, List<string>> mockFiles = null)
         {
             // Get the extension folder path for YamlParser initialization
@@ -2185,10 +2239,30 @@ namespace Spoomples.Extensions.WildcardImporter
                            "<wcmatch:<wccase[myvar invalid \"test\"]:content>>",
                            "If with invalid operation");
 
-            // Unmatched parentheses in list - should return original with warning
-            AssertTransform("<ppp:if myvar in (val1,val2>content<ppp:/if>",
+            // Unmatched parentheses in list - the block is left as written and the import warns.
+            // Converting it would emit "contains((val1,val2, myvar)", which cannot compile, so the
+            // only sign of trouble would be a generation-time warning and a branch that never fires.
+            AssertTransformWarns("<ppp:if myvar in (val1,val2>content<ppp:/if>",
                            "<ppp:if myvar in (val1,val2>content<ppp:/if>",
+                           "Unbalanced parentheses in if condition",
                            "If with unmatched parentheses");
+
+            // A closing parenthesis with nothing to close is unbalanced too, even though the counts match.
+            AssertTransformWarns("<ppp:if myvar in val1)>content<ppp:/if>",
+                           "<ppp:if myvar in val1)>content<ppp:/if>",
+                           "Unbalanced parentheses in if condition",
+                           "If with stray closing parenthesis");
+
+            // Parentheses inside a string literal are text, not structure.
+            AssertTransform("<ppp:if myvar eq \"a(b\">content<ppp:/if>",
+                           "<wcmatch:<wccase[myvar eq \"a(b\"]:content>>",
+                           "If with parenthesis inside a quoted value");
+
+            // An unterminated quote cannot be read at all - warn and leave the block alone.
+            AssertTransformWarns("<ppp:if myvar eq \"test>content<ppp:/if>",
+                           "<ppp:if myvar eq \"test>content<ppp:/if>",
+                           "Unterminated quote in if condition",
+                           "If with unterminated quote");
 
             // Empty condition
             AssertTransform("<ppp:if>content<ppp:/if>",
@@ -2201,10 +2275,43 @@ namespace Spoomples.Extensions.WildcardImporter
                            "<wcmatch:<wccase[myvar   eq   \"test\"]:content>>",
                            "If with extra whitespace");
 
-            // Case insensitive operations
-            AssertTransform("<ppp:if myvar EQ \"test\">content<ppp:/if>",
-                           "<wcmatch:<wccase[myvar eq \"test\"]:content>>",
+            // Operators are lowercase-only in the source format - the PPP grammar spells them as
+            // literals and as /eq|ne|gt|lt|ge|le|contains/ with no /i, while it does mark BOOLEAN
+            // as /true|false/i. So an uppercase operator is invalid input, not a dialect we should
+            // accept: warn about it and carry the condition over exactly as written.
+            AssertTransformWarns("<ppp:if myvar EQ \"test\">content<ppp:/if>",
+                           "<wcmatch:<wccase[myvar EQ \"test\"]:content>>",
+                           "Operator 'EQ' must be lowercase ('eq')",
                            "If with uppercase operation");
+
+            // The list/contains scanner and the "not eq" -> "ne" rewrites are all case sensitive,
+            // so every keyword shares this root cause.
+            AssertTransformWarns("<ppp:if myvar IN (val1,val2)>content<ppp:/if>",
+                           "<wcmatch:<wccase[myvar IN (val1,val2)]:content>>",
+                           "Operator 'IN' must be lowercase ('in')",
+                           "If with uppercase in operator");
+
+            AssertTransformWarns("<ppp:if myvar CONTAINS \"test\">content<ppp:/if>",
+                           "<wcmatch:<wccase[myvar CONTAINS \"test\"]:content>>",
+                           "Operator 'CONTAINS' must be lowercase ('contains')",
+                           "If with uppercase contains operator");
+
+            // Mixed case is the dangerous one: the scanner would read "NOT" as the variable name
+            // and emit contains(NOT, "test"). Nothing is rewritten now.
+            AssertTransformWarns("<ppp:if myvar NOT contains \"test\">content<ppp:/if>",
+                           "<wcmatch:<wccase[myvar NOT contains \"test\"]:content>>",
+                           "Operator 'NOT' must be lowercase ('not')",
+                           "If with uppercase not operator");
+
+            AssertTransformWarns("<ppp:if a eq 1 AND b eq 2>content<ppp:/if>",
+                           "<wcmatch:<wccase[a eq 1 AND b eq 2]:content>>",
+                           "Operator 'AND' must be lowercase ('and')",
+                           "If with uppercase and operator");
+
+            // A keyword spelling inside a string literal is a value, not an operator.
+            AssertTransform("<ppp:if myvar eq \"IN\">content<ppp:/if>",
+                           "<wcmatch:<wccase[myvar eq \"IN\"]:content>>",
+                           "If with uppercase keyword inside a quoted value");
 
             // Variable with special characters
             AssertTransform("<ppp:if my_var-123 eq \"test\">content<ppp:/if>",

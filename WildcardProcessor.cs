@@ -388,10 +388,12 @@ namespace Spoomples.Extensions.WildcardImporter
 
                 // Process each line in the file
                 List<string> processedLines = new List<string>();
+                task.CurrentFile = filePath;
                 foreach (var line in lines)
                 {
                     processedLines.Add(ProcessWildcardLine(line, taskId));
                 }
+                task.CurrentFile = null;
 
                 // Regular text file
                 string outputPath = Path.Combine(destinationFolder, task.Prefix + filePath);
@@ -577,7 +579,10 @@ namespace Spoomples.Extensions.WildcardImporter
             if (ifMatch.Success)
             {
                 var ifExpr = ifMatch.Groups["expr"].Value;
-                opts = $"{opts.Substring(0, ifMatch.Index).Trim()} if {ProcessCondition(ifExpr, task)}";
+                // A condition we could not read is left exactly as written (ProcessCondition has
+                // already warned about it); dropping it would leave a dangling "if" behind.
+                string processedIfExpr = ProcessCondition(ifExpr, task) ?? ifExpr;
+                opts = $"{opts.Substring(0, ifMatch.Index).Trim()} if {processedIfExpr}";
             }
 
             // Check for single quotes: 'labels'
@@ -2518,6 +2523,133 @@ namespace Spoomples.Extensions.WildcardImporter
             return result;
         }
 
+        /// <summary>What to do with a condition after <see cref="ValidateCondition"/> has looked at it.</summary>
+        private enum ConditionVerdict
+        {
+            /// <summary>Well formed as far as we can tell; convert it.</summary>
+            Convert,
+            /// <summary>Not valid source syntax, but harmless to carry over verbatim; emit it as written.</summary>
+            EmitVerbatim,
+            /// <summary>Cannot be read at all; the whole if block is left as written.</summary>
+            Unconvertible,
+        }
+
+        /// <summary>
+        /// Keywords the PPP condition grammar spells as lowercase literals. The grammar writes
+        /// them as "and"/"or"/"not" and /eq|ne|gt|lt|ge|le|contains/ and /contains|in/ - none of
+        /// those carry the /i flag that the same grammar does put on BOOLEAN - so an uppercase
+        /// spelling is invalid in the file we are importing, not merely unsupported here.
+        /// </summary>
+        private static readonly HashSet<string> ConditionKeywords = new(StringComparer.Ordinal)
+        {
+            "eq", "ne", "gt", "lt", "ge", "le", "contains", "in", "not", "and", "or"
+        };
+
+        private static readonly Regex ConditionWordRE = new(@"[A-Za-z_][A-Za-z0-9_]*", RegexOptions.Compiled);
+
+        /// <summary>
+        /// Returns a copy of <paramref name="text"/> with every quoted span blanked out, so that a
+        /// parenthesis or a keyword-looking word inside a string literal is not mistaken for syntax.
+        /// Positions are preserved (each masked character becomes a space).
+        /// </summary>
+        private static string MaskQuotedSpans(string text, out bool unterminatedQuote)
+        {
+            char[] buf = text.ToCharArray();
+            char quote = '\0';
+            for (int i = 0; i < text.Length; i++)
+            {
+                char c = text[i];
+                if (quote == '\0')
+                {
+                    if (c == '"' || c == '\'')
+                    {
+                        quote = c;
+                        buf[i] = ' ';
+                    }
+                }
+                else
+                {
+                    buf[i] = ' ';
+                    if (c == quote && !IsBackslashEscaped(text, i))
+                    {
+                        quote = '\0';
+                    }
+                }
+            }
+            unterminatedQuote = quote != '\0';
+            return new string(buf);
+        }
+
+        /// <summary>True if the character at <paramref name="index"/> is preceded by an odd number of backslashes.</summary>
+        private static bool IsBackslashEscaped(string text, int index)
+        {
+            int backslashes = 0;
+            for (int i = index - 1; i >= 0 && text[i] == '\\'; i--)
+            {
+                backslashes++;
+            }
+            return (backslashes % 2) == 1;
+        }
+
+        /// <summary>
+        /// Checks a condition for the malformations that would otherwise produce a wccase
+        /// expression that cannot compile, and warns about them at import time.
+        /// <para>
+        /// Import warnings are shown in the WildcardImporter UI; a bad condition that gets written
+        /// out anyway only complains during prompt generation, where the message is easy to miss
+        /// and all the user sees is a branch that never fires. So we report here and, deliberately,
+        /// do not try to guess what was meant - nothing is rewritten or repaired.
+        /// </para>
+        /// </summary>
+        private ConditionVerdict ValidateCondition(string condition, ProcessingTask task)
+        {
+            string where = string.IsNullOrEmpty(task.CurrentFile) ? "" : $" in {task.CurrentFile}";
+            string masked = MaskQuotedSpans(condition, out bool unterminatedQuote);
+
+            if (unterminatedQuote)
+            {
+                task.AddWarning($"Unterminated quote in if condition{where}, leaving it unconverted: {condition}");
+                return ConditionVerdict.Unconvertible;
+            }
+
+            int depth = 0;
+            bool balanced = true;
+            foreach (char c in masked)
+            {
+                if (c == '(')
+                {
+                    depth++;
+                }
+                else if (c == ')')
+                {
+                    depth--;
+                    if (depth < 0)
+                    {
+                        balanced = false;
+                        break;
+                    }
+                }
+            }
+            if (!balanced || depth != 0)
+            {
+                task.AddWarning($"Unbalanced parentheses in if condition{where}, leaving it unconverted: {condition}");
+                return ConditionVerdict.Unconvertible;
+            }
+
+            foreach (Match word in ConditionWordRE.Matches(masked))
+            {
+                string lower = word.Value.ToLowerInvariant();
+                if (lower == word.Value || !ConditionKeywords.Contains(lower))
+                {
+                    continue;
+                }
+                task.AddWarning($"Operator '{word.Value}' must be lowercase ('{lower}'){where}, leaving the condition unconverted: {condition}");
+                return ConditionVerdict.EmitVerbatim;
+            }
+
+            return ConditionVerdict.Convert;
+        }
+
         /// <summary>
         /// Processes a condition expression and converts it to wccase syntax.
         /// </summary>
@@ -2527,6 +2659,18 @@ namespace Spoomples.Extensions.WildcardImporter
 
             if (string.IsNullOrWhiteSpace(condition))
                 return null;
+
+            switch (ValidateCondition(condition, task))
+            {
+                case ConditionVerdict.Unconvertible:
+                    return null;
+                case ConditionVerdict.EmitVerbatim:
+                    // The operator rewriting below is all case sensitive, so running it over a
+                    // condition with an uppercase operator would half-apply: it would leave
+                    // "myvar EQ x" alone but read the "NOT" of "myvar NOT contains x" as the
+                    // variable name. Emit what the user wrote instead of a mangled version of it.
+                    return condition;
+            }
 
             // replace some operators
             condition = condition
@@ -2960,6 +3104,10 @@ namespace Spoomples.Extensions.WildcardImporter
         public ProcessingStatusEnum Status;
         public ConcurrentBag<string> Errors = new();
         public List<string> Warnings = new();
+
+        /// <summary>The wildcard file currently being processed, so a warning can say where it came
+        /// from. Null outside <see cref="WildcardProcessor.ProcessCollectedFiles"/>.</summary>
+        public string CurrentFile;
 
         public void AddWarning(string warning)
         {
