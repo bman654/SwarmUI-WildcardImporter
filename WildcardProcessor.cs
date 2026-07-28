@@ -203,6 +203,26 @@ namespace Spoomples.Extensions.WildcardImporter
             Logs.Debug($"YAML file contents collected: {yamlPath}");
         }
 
+        /// <summary>
+        /// Keeps an empty choice selectable.
+        /// <para>
+        /// An empty item in a source list is a real choice: it competes on weight with its
+        /// siblings and means "this slot produces nothing this time". Written out as a blank line
+        /// it would be lost, because SwarmUI's wildcard loader discards blank rows before the
+        /// choice set is built (WildcardsHelper.GetWildcard filters on IsNullOrWhiteSpace) - so
+        /// the slot would fire every time instead of declining at its intended rate. Emitting
+        /// &lt;comment:empty&gt; survives the filter and still renders as nothing.
+        /// </para>
+        /// <para>
+        /// Only list items from structured (YAML) sources go through here. Blank lines in an
+        /// imported plain text wildcard file are formatting, not choices, and are left alone.
+        /// </para>
+        /// </summary>
+        private static string PreserveEmptyChoice(string item)
+        {
+            return string.IsNullOrWhiteSpace(item) ? "<comment:empty>" : item;
+        }
+
         private void CollectYamlContent(string taskId, string currentPath, object currentValue)
         {
             Logs.Debug($"Collecting YAML content: {currentPath}");
@@ -242,7 +262,7 @@ namespace Spoomples.Extensions.WildcardImporter
                 if (currentList.Count == 1 && currentList[0] is string singleItem)
                 {
                     // Store in memory with path structure
-                    task.InMemoryFiles.TryAdd(currentPath, new List<string> { singleItem });
+                    task.InMemoryFiles.TryAdd(currentPath, new List<string> { PreserveEmptyChoice(singleItem) });
                 }
                 else
                 {
@@ -251,7 +271,7 @@ namespace Spoomples.Extensions.WildcardImporter
                     {
                         if (item is string stringItem)
                         {
-                            stringList.Add(stringItem);
+                            stringList.Add(PreserveEmptyChoice(stringItem));
                         }
                         else if (item is List<object>)
                         {

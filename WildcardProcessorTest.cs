@@ -100,6 +100,9 @@ namespace Spoomples.Extensions.WildcardImporter
             // Test recursive processing regression tests
             TestRecursiveProcessingRegression();
 
+            // Test empty choice preservation
+            TestEmptyChoicePreservation();
+
             // Test prompt cleanup
             TestCleanUnmatchedAngleBrackets();
 
@@ -1746,6 +1749,42 @@ namespace Spoomples.Extensions.WildcardImporter
 
         #endregion
 
+        #region Test Empty Choices
+
+        /// <summary>
+        /// An empty item in a source list is a selectable choice competing on weight, not a
+        /// formatting artifact. It has to reach the generated file as something that survives
+        /// SwarmUI's blank-row filter, otherwise the slot fires every time instead of declining
+        /// at its intended rate.
+        /// </summary>
+        private static void TestEmptyChoicePreservation()
+        {
+            AssertYamlChoices(new List<object> { "red", "", "blue" },
+                              new[] { "red", "<comment:empty>", "blue" },
+                              "Empty choice in a list is preserved");
+
+            AssertYamlChoices(new List<object> { "10::red", "", "5::blue" },
+                              new[] { "10::red", "<comment:empty>", "5::blue" },
+                              "Empty choice alongside weighted choices is preserved");
+
+            AssertYamlChoices(new List<object> { "red", "   " },
+                              new[] { "red", "<comment:empty>" },
+                              "Whitespace-only choice is preserved");
+
+            AssertYamlChoices(new List<object> { "" },
+                              new[] { "<comment:empty>" },
+                              "Single empty choice is preserved");
+
+            AssertYamlChoices(new List<object> { "red", "blue" },
+                              new[] { "red", "blue" },
+                              "Lists without empty choices are unchanged");
+
+            // The marker has to come through the line transform untouched.
+            AssertTransform("<comment:empty>", "<comment:empty>", "Empty choice marker survives the line transform");
+        }
+
+        #endregion
+
         #region Test Prompt Cleanup
 
         /// <summary>
@@ -1820,6 +1859,47 @@ namespace Spoomples.Extensions.WildcardImporter
         #endregion
 
         #region Helper Methods
+
+        /// <summary>
+        /// Collects a YAML list through the private CollectYamlContent and checks the choices it
+        /// stored for that path.
+        /// </summary>
+        private static void AssertYamlChoices(List<object> yamlList, string[] expected, string testName)
+        {
+            try
+            {
+                var processor = CreateTestProcessor();
+                string taskId = "test-task";
+                var task = new ProcessingTask { Id = taskId, Prefix = "" };
+
+                var tasksField = processor.GetType().GetField("_tasks",
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                var tasks = new ConcurrentDictionary<string, ProcessingTask> { [taskId] = task };
+                tasksField?.SetValue(processor, tasks);
+
+                var method = processor.GetType().GetMethod("CollectYamlContent",
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+                if (method == null)
+                {
+                    throw new Exception("CollectYamlContent method not found");
+                }
+
+                method.Invoke(processor, new object[] { taskId, "pool", yamlList });
+
+                task.InMemoryFiles.TryGetValue("pool", out List<string> choices);
+                AssertEquals(string.Join(" | ", choices ?? new List<string>()),
+                             string.Join(" | ", expected),
+                             testName);
+            }
+            catch (Exception ex)
+            {
+                _testsFailed++;
+                string message = $"{testName}: Exception - {ex.Message}";
+                _failureMessages.Add(message);
+                Logs.Error($"✗ {message}");
+            }
+        }
 
         /// <summary>
         /// Runs a prompt through WildcardImporterExtension.Clean, which is private and is wired in
