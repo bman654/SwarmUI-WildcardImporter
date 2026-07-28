@@ -498,58 +498,58 @@ namespace Spoomples.Extensions.WildcardImporter
         {
             // Basic single variable override: __wildcard(var=value)__
             AssertTransform("__colors(theme=warm)__ are nice",
-                           "<wcpushmacro[theme]:warm><wcwildcard:colors><wcpopmacro:theme> are nice",
+                           "<wcpushvar[theme]:warm><wcpushmacro[theme]:<var:theme>><wcwildcard:colors><wcpopmacro:theme><wcpopvar:theme> are nice",
                            "Basic single variable override");
 
             // Single variable override with commas in value: __wildcard(var=value with, commas)__
             AssertTransform("__foods(ingredients=salt, pepper, herbs)__ taste good",
-                           "<wcpushmacro[ingredients]:salt, pepper, herbs><wcwildcard:foods><wcpopmacro:ingredients> taste good",
+                           "<wcpushvar[ingredients]:salt, pepper, herbs><wcpushmacro[ingredients]:<var:ingredients>><wcwildcard:foods><wcpopmacro:ingredients><wcpopvar:ingredients> taste good",
                            "Single variable override with commas in value");
 
             // Variable override with nested parentheses in value: __wildcard(var=value (with nested) text)__
             AssertTransform("__styles(mood=happy (very excited) feeling)__ today",
-                           "<wcpushmacro[mood]:happy (very excited) feeling><wcwildcard:styles><wcpopmacro:mood> today",
+                           "<wcpushvar[mood]:happy (very excited) feeling><wcpushmacro[mood]:<var:mood>><wcwildcard:styles><wcpopmacro:mood><wcpopvar:mood> today",
                            "Variable override with nested parentheses");
 
             // Variable override with quantifier: __2$$wildcard(var=value)__
             AssertTransform("__2$$colors(brightness=bright)__ shine",
-                           "<wcpushmacro[brightness]:bright><wcwildcard[2,]:colors><wcpopmacro:brightness> shine",
+                           "<wcpushvar[brightness]:bright><wcpushmacro[brightness]:<var:brightness>><wcwildcard[2,]:colors><wcpopmacro:brightness><wcpopvar:brightness> shine",
                            "Variable override with quantifier");
 
             // Variable override with range quantifier: __2-3$$wildcard(var=value)__
             AssertTransform("__2-3$$animals(type=mammal)__ are cute",
-                           "<wcpushmacro[type]:mammal><wcwildcard[2-3,]:animals><wcpopmacro:type> are cute",
+                           "<wcpushvar[type]:mammal><wcpushmacro[type]:<var:type>><wcwildcard[2-3,]:animals><wcpopmacro:type><wcpopvar:type> are cute",
                            "Variable override with range quantifier");
 
             // Variable override with custom separator: __2$$ and $$wildcard(var=value)__
             AssertTransform("__2$$ and $$colors(tone=pastel)__ blend well",
-                           "<wcpushmacro[tone]:pastel><wcwildcard[2, and ]:colors><wcpopmacro:tone> blend well",
+                           "<wcpushvar[tone]:pastel><wcpushmacro[tone]:<var:tone>><wcwildcard[2, and ]:colors><wcpopmacro:tone><wcpopvar:tone> blend well",
                            "Variable override with custom separator");
 
             // Variable override with label filter: __wildcard'filter'(var=value)__
             AssertTransform("__colors'primary'(intensity=high)__ are bold",
-                           "<wcpushmacro[intensity]:high><wcpushmacro[wcfilter_colors]:primary><wcwildcard:colors:primary><wcpopmacro:wcfilter_colors><wcpopmacro:intensity> are bold",
+                           "<wcpushvar[intensity]:high><wcpushmacro[intensity]:<var:intensity>><wcpushmacro[wcfilter_colors]:primary><wcwildcard:colors:primary><wcpopmacro:wcfilter_colors><wcpopmacro:intensity><wcpopvar:intensity> are bold",
                            "Variable override with label filter");
 
             // Variable override with glob pattern: __wildcard*(var=value)__
             AssertTransform("__colors*(mood=cheerful)__ are uplifting",
-                           "<wcpushmacro[mood]:cheerful><wcrandom:<wcwildcard:colors-cold>|<wcwildcard:colors-warm>><wcpopmacro:mood> are uplifting",
+                           "<wcpushvar[mood]:cheerful><wcpushmacro[mood]:<var:mood>><wcrandom:<wcwildcard:colors-cold>|<wcwildcard:colors-warm>><wcpopmacro:mood><wcpopvar:mood> are uplifting",
                            "Variable override with glob pattern",
                            CreateMockFiles("colors-cold", "colors-warm"));
 
             // Variable override with complex value containing parentheses and commas
             AssertTransform("__recipes(description=chicken (grilled) with herbs, served hot)__ for dinner",
-                           "<wcpushmacro[description]:chicken (grilled) with herbs, served hot><wcwildcard:recipes><wcpopmacro:description> for dinner",
+                           "<wcpushvar[description]:chicken (grilled) with herbs, served hot><wcpushmacro[description]:<var:description>><wcwildcard:recipes><wcpopmacro:description><wcpopvar:description> for dinner",
                            "Variable override with complex value");
 
             // Variable override in variants: {__wildcard(var=value)__|other}
             AssertTransform("I like {__colors(mood=bright)__|dark themes}",
-                           "I like <wcrandom:<wcpushmacro[mood]:bright><wcwildcard:colors><wcpopmacro:mood>|dark themes>",
+                           "I like <wcrandom:<wcpushvar[mood]:bright><wcpushmacro[mood]:<var:mood>><wcwildcard:colors><wcpopmacro:mood><wcpopvar:mood>|dark themes>",
                            "Variable override in variant");
 
             // Multiple wildcards with different variable overrides
             AssertTransform("__colors(tone=warm)__ and __animals(size=small)__ together",
-                           "<wcpushmacro[tone]:warm><wcwildcard:colors><wcpopmacro:tone> and <wcpushmacro[size]:small><wcwildcard:animals><wcpopmacro:size> together",
+                           "<wcpushvar[tone]:warm><wcpushmacro[tone]:<var:tone>><wcwildcard:colors><wcpopmacro:tone><wcpopvar:tone> and <wcpushvar[size]:small><wcpushmacro[size]:<var:size>><wcwildcard:animals><wcpopmacro:size><wcpopvar:size> together",
                            "Multiple wildcards with different variable overrides");
 
             // Edge case: empty variable name (should be ignored)
@@ -569,7 +569,7 @@ namespace Spoomples.Extensions.WildcardImporter
 
             // Edge case: variable override with no wildcard content
             AssertTransform("__(var=value)__ test",
-                           "<wcpushmacro[var]:value><wcwildcard:><wcpopmacro:var> test",
+                           "<wcpushvar[var]:value><wcpushmacro[var]:<var:var>><wcwildcard:><wcpopmacro:var><wcpopvar:var> test",
                            "Variable override with empty wildcard");
         }
 
