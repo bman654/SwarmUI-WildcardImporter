@@ -392,8 +392,14 @@ namespace Spoomples.Extensions.WildcardImporter
 
         private string ProcessWildcards(string line, string taskId)
         {
-            var openChars = new[] { '{', '<', '(' };
-            var closeChars = new[] { '}', '>', ')' };
+            // '<' and '>' are deliberately NOT tracked as nesting delimiters here.
+            // At this point in the pipeline the line is still raw PPP source, so any angle
+            // bracket it contains is content (an emoticon like ":<" or ">_o"), not structure.
+            // Tracking them meant an unbalanced angle bracket left FindTopLevelChar's nesting
+            // counter permanently non-zero, so the closing "__" of the span was never found and
+            // the whole __wildcard(arg)__ reference was emitted verbatim.
+            var openChars = new[] { '{', '(' };
+            var closeChars = new[] { '}', ')' };
             int pos = 0;
             while ((pos = line.IndexOf("__", pos, StringComparison.Ordinal)) != -1)
             {

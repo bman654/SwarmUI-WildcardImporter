@@ -46,6 +46,7 @@ namespace Spoomples.Extensions.WildcardImporter
             TestGlobWildcards();
             TestAdvancedWildcardOptions();
             TestVariableOverrides();
+            TestAngleBracketsInWildcardArgs();
 
             // Test label filtering
             TestLabelFiltering();
@@ -559,6 +560,36 @@ namespace Spoomples.Extensions.WildcardImporter
             AssertTransform("__(var=value)__ test",
                            "<wcpushmacro[var]:value><wcwildcard:><wcpopmacro:var> test",
                            "Variable override with empty wildcard");
+        }
+
+        /// <summary>
+        /// A wildcard argument may legitimately contain an unbalanced '&lt;' or '&gt;' (booru
+        /// emoticon tags such as ";&lt;" or "&gt;_o"). Angle brackets are not nesting delimiters
+        /// for the "__...__" span scanner, so these must transform like any other argument
+        /// instead of being left in the file verbatim.
+        /// Values carrying a '&gt;' need the emission-time encoding step as well (a raw '&gt;'
+        /// closes the emitted tag early for the later transform stages), so they are asserted
+        /// alongside that step rather than here.
+        /// </summary>
+        private static void TestAngleBracketsInWildcardArgs()
+        {
+            AssertTransform("__u(q=;<)__ face",
+                           "<wcpushvar[q]:;<><wcpushmacro[q]:<var:q>><wcwildcard:u><wcpopmacro:q><wcpopvar:q> face",
+                           "Wildcard arg with trailing '<'");
+
+            AssertTransform("__u(q=:<)__ face",
+                           "<wcpushvar[q]::<><wcpushmacro[q]:<var:q>><wcwildcard:u><wcpopmacro:q><wcpopvar:q> face",
+                           "Wildcard arg with unbalanced '<'");
+
+            // Balanced angles always worked (the counter returned to zero); keep them covered.
+            AssertTransform("__u(q=>_<)__ face",
+                           "<wcpushvar[q]:>_<><wcpushmacro[q]:<var:q>><wcwildcard:u><wcpopmacro:q><wcpopvar:q> face",
+                           "Wildcard arg with balanced angles");
+
+            // A '<' anywhere else on the line must not hide a later wildcard reference either.
+            AssertTransform("mood :< and __colors__",
+                           "mood :< and <wcwildcard:colors>",
+                           "Stray '<' before a plain wildcard reference");
         }
 
         private static void TestLabelFiltering()
