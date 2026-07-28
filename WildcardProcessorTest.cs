@@ -100,6 +100,9 @@ namespace Spoomples.Extensions.WildcardImporter
             // Test recursive processing regression tests
             TestRecursiveProcessingRegression();
 
+            // Test prompt cleanup
+            TestCleanUnmatchedAngleBrackets();
+
             // Test the base64 directive used to carry angle brackets
             TestBase64Directive();
 
@@ -1743,6 +1746,44 @@ namespace Spoomples.Extensions.WildcardImporter
 
         #endregion
 
+        #region Test Prompt Cleanup
+
+        /// <summary>
+        /// Clean() splits a prompt into tag and text sections and tidies the text sections. An
+        /// unmatched '&lt;' is text, not the start of a tag section - a rendered prompt can
+        /// legitimately contain one (";&lt;", ":&lt;", "&gt;_&lt;") - and treating it as a section
+        /// opener used to eat the punctuation that followed it.
+        /// </summary>
+        private static void TestCleanUnmatchedAngleBrackets()
+        {
+            AssertClean("head, ;<, tail", "head, ;<, tail",
+                        "Clean keeps the comma after an unmatched '<'");
+
+            AssertClean("head, :<, tail", "head, :<, tail",
+                        "Clean keeps the comma after a leading-colon emoticon");
+
+            AssertClean("head, >_<, tail", "head, >_<, tail",
+                        "Clean keeps the comma after a balanced-angle emoticon");
+
+            // Control: a value with only '>' never hit this path.
+            AssertClean("head, :>, tail", "head, :>, tail",
+                        "Clean is unchanged for a '>' only emoticon");
+
+            // The ordinary text cleanup still applies.
+            AssertClean("head,   ,  tail ", "head, tail",
+                        "Clean still collapses repeated commas and whitespace");
+
+            // A well-formed tag after an unmatched '<' must still be recognised as a tag and
+            // passed through untouched.
+            AssertClean("head, :<, <wcdetailer:girl  |  face>", "head, :<<wcdetailer:girl  |  face>",
+                        "Clean still recognises a tag that follows an unmatched '<'");
+
+            AssertClean("<wcdetailer:girl  |  face>", "<wcdetailer:girl  |  face>",
+                        "Clean leaves a lone tag untouched");
+        }
+
+        #endregion
+
         #region Test Base64 Directive
 
         /// <summary>
@@ -1779,6 +1820,35 @@ namespace Spoomples.Extensions.WildcardImporter
         #endregion
 
         #region Helper Methods
+
+        /// <summary>
+        /// Runs a prompt through WildcardImporterExtension.Clean, which is private and is wired in
+        /// production through T2IParamInput.LateSpecialParameterHandlers.
+        /// </summary>
+        private static void AssertClean(string input, string expected, string testName)
+        {
+            try
+            {
+                var extension = new WildcardImporterExtension();
+                var method = typeof(WildcardImporterExtension).GetMethod("Clean",
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+                if (method == null)
+                {
+                    throw new Exception("Clean method not found");
+                }
+
+                string result = (string)method.Invoke(extension, new object[] { input });
+                AssertEquals(result, expected, testName);
+            }
+            catch (Exception ex)
+            {
+                _testsFailed++;
+                string message = $"{testName}: Exception - {ex.Message}";
+                _failureMessages.Add(message);
+                Logs.Error($"✗ {message}");
+            }
+        }
 
         private static void AssertEquals(string actual, string expected, string testName)
         {
