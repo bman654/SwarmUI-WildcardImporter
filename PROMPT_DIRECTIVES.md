@@ -339,6 +339,37 @@ A `<wccase>` block with no condition will be treated as the default case and wil
 >
 ```
 
+## Literal Text
+
+### `<wcbase64>`
+
+Emits the base64-decoded form of its payload.
+
+SwarmUI scans prompt tags with a plain `<`..`>` delimiter scanner that has no escape mechanism,
+so a literal `<` or `>` cannot be written inside a tag value: a `>` closes the tag early and a `<`
+stops it closing. `<wcbase64>` is the way to carry such a value, which matters for booru emoticon
+tags like `;<`, `:>`, `>_<` and `>_o`.
+
+**Syntax:**
+```
+<wcbase64:BASE64TEXT>
+```
+
+**Examples:**
+```
+<wcbase64:Oj4=>                              renders as  :>
+<wcpushvar[q]:<wcbase64:Ozw=>>               pushes  ;<  onto the variable q
+```
+
+The decoded text is never re-parsed as prompt syntax, so any `<` or `>` it contains is inert.
+When used inside another directive's value, the decoding still happens before the value is stored,
+so conditions that inspect the variable see the real text rather than the encoded form.
+
+The wildcard transform emits this automatically: an argument value containing `<` or `>` is
+base64-encoded at emission time. Values without angle brackets are emitted as-is.
+
+An invalid payload renders as nothing and records a parser warning.
+
 ## Usage Tips
 
 1. **Combining Directives**: These directives can be combined with SwarmUI's built-in syntax:

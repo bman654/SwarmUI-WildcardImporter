@@ -46,6 +46,9 @@ namespace Spoomples.Extensions.WildcardImporter
             TestGlobWildcards();
             TestAdvancedWildcardOptions();
             TestVariableOverrides();
+            TestAngleBracketsInWildcardArgs();
+            TestEscapedParensInWildcardArgs();
+            TestEmoticonArgumentEncoding();
 
             // Test label filtering
             TestLabelFiltering();
@@ -96,6 +99,15 @@ namespace Spoomples.Extensions.WildcardImporter
 
             // Test recursive processing regression tests
             TestRecursiveProcessingRegression();
+
+            // Test empty choice preservation
+            TestEmptyChoicePreservation();
+
+            // Test prompt cleanup
+            TestCleanUnmatchedAngleBrackets();
+
+            // Test the base64 directive used to carry angle brackets
+            TestBase64Directive();
 
             // Test BREAK word replacement
             TestBreakWordReplacement();
@@ -486,58 +498,58 @@ namespace Spoomples.Extensions.WildcardImporter
         {
             // Basic single variable override: __wildcard(var=value)__
             AssertTransform("__colors(theme=warm)__ are nice",
-                           "<wcpushmacro[theme]:warm><wcwildcard:colors><wcpopmacro:theme> are nice",
+                           "<wcpushvar[theme]:warm><wcpushmacro[theme]:<var:theme>><wcwildcard:colors><wcpopmacro:theme><wcpopvar:theme> are nice",
                            "Basic single variable override");
 
             // Single variable override with commas in value: __wildcard(var=value with, commas)__
             AssertTransform("__foods(ingredients=salt, pepper, herbs)__ taste good",
-                           "<wcpushmacro[ingredients]:salt, pepper, herbs><wcwildcard:foods><wcpopmacro:ingredients> taste good",
+                           "<wcpushvar[ingredients]:salt, pepper, herbs><wcpushmacro[ingredients]:<var:ingredients>><wcwildcard:foods><wcpopmacro:ingredients><wcpopvar:ingredients> taste good",
                            "Single variable override with commas in value");
 
             // Variable override with nested parentheses in value: __wildcard(var=value (with nested) text)__
             AssertTransform("__styles(mood=happy (very excited) feeling)__ today",
-                           "<wcpushmacro[mood]:happy (very excited) feeling><wcwildcard:styles><wcpopmacro:mood> today",
+                           "<wcpushvar[mood]:happy (very excited) feeling><wcpushmacro[mood]:<var:mood>><wcwildcard:styles><wcpopmacro:mood><wcpopvar:mood> today",
                            "Variable override with nested parentheses");
 
             // Variable override with quantifier: __2$$wildcard(var=value)__
             AssertTransform("__2$$colors(brightness=bright)__ shine",
-                           "<wcpushmacro[brightness]:bright><wcwildcard[2,]:colors><wcpopmacro:brightness> shine",
+                           "<wcpushvar[brightness]:bright><wcpushmacro[brightness]:<var:brightness>><wcwildcard[2,]:colors><wcpopmacro:brightness><wcpopvar:brightness> shine",
                            "Variable override with quantifier");
 
             // Variable override with range quantifier: __2-3$$wildcard(var=value)__
             AssertTransform("__2-3$$animals(type=mammal)__ are cute",
-                           "<wcpushmacro[type]:mammal><wcwildcard[2-3,]:animals><wcpopmacro:type> are cute",
+                           "<wcpushvar[type]:mammal><wcpushmacro[type]:<var:type>><wcwildcard[2-3,]:animals><wcpopmacro:type><wcpopvar:type> are cute",
                            "Variable override with range quantifier");
 
             // Variable override with custom separator: __2$$ and $$wildcard(var=value)__
             AssertTransform("__2$$ and $$colors(tone=pastel)__ blend well",
-                           "<wcpushmacro[tone]:pastel><wcwildcard[2, and ]:colors><wcpopmacro:tone> blend well",
+                           "<wcpushvar[tone]:pastel><wcpushmacro[tone]:<var:tone>><wcwildcard[2, and ]:colors><wcpopmacro:tone><wcpopvar:tone> blend well",
                            "Variable override with custom separator");
 
             // Variable override with label filter: __wildcard'filter'(var=value)__
             AssertTransform("__colors'primary'(intensity=high)__ are bold",
-                           "<wcpushmacro[intensity]:high><wcpushmacro[wcfilter_colors]:primary><wcwildcard:colors:primary><wcpopmacro:wcfilter_colors><wcpopmacro:intensity> are bold",
+                           "<wcpushvar[intensity]:high><wcpushmacro[intensity]:<var:intensity>><wcpushmacro[wcfilter_colors]:primary><wcwildcard:colors:primary><wcpopmacro:wcfilter_colors><wcpopmacro:intensity><wcpopvar:intensity> are bold",
                            "Variable override with label filter");
 
             // Variable override with glob pattern: __wildcard*(var=value)__
             AssertTransform("__colors*(mood=cheerful)__ are uplifting",
-                           "<wcpushmacro[mood]:cheerful><wcrandom:<wcwildcard:colors-cold>|<wcwildcard:colors-warm>><wcpopmacro:mood> are uplifting",
+                           "<wcpushvar[mood]:cheerful><wcpushmacro[mood]:<var:mood>><wcrandom:<wcwildcard:colors-cold>|<wcwildcard:colors-warm>><wcpopmacro:mood><wcpopvar:mood> are uplifting",
                            "Variable override with glob pattern",
                            CreateMockFiles("colors-cold", "colors-warm"));
 
             // Variable override with complex value containing parentheses and commas
             AssertTransform("__recipes(description=chicken (grilled) with herbs, served hot)__ for dinner",
-                           "<wcpushmacro[description]:chicken (grilled) with herbs, served hot><wcwildcard:recipes><wcpopmacro:description> for dinner",
+                           "<wcpushvar[description]:chicken (grilled) with herbs, served hot><wcpushmacro[description]:<var:description>><wcwildcard:recipes><wcpopmacro:description><wcpopvar:description> for dinner",
                            "Variable override with complex value");
 
             // Variable override in variants: {__wildcard(var=value)__|other}
             AssertTransform("I like {__colors(mood=bright)__|dark themes}",
-                           "I like <wcrandom:<wcpushmacro[mood]:bright><wcwildcard:colors><wcpopmacro:mood>|dark themes>",
+                           "I like <wcrandom:<wcpushvar[mood]:bright><wcpushmacro[mood]:<var:mood>><wcwildcard:colors><wcpopmacro:mood><wcpopvar:mood>|dark themes>",
                            "Variable override in variant");
 
             // Multiple wildcards with different variable overrides
             AssertTransform("__colors(tone=warm)__ and __animals(size=small)__ together",
-                           "<wcpushmacro[tone]:warm><wcwildcard:colors><wcpopmacro:tone> and <wcpushmacro[size]:small><wcwildcard:animals><wcpopmacro:size> together",
+                           "<wcpushvar[tone]:warm><wcpushmacro[tone]:<var:tone>><wcwildcard:colors><wcpopmacro:tone><wcpopvar:tone> and <wcpushvar[size]:small><wcpushmacro[size]:<var:size>><wcwildcard:animals><wcpopmacro:size><wcpopvar:size> together",
                            "Multiple wildcards with different variable overrides");
 
             // Edge case: empty variable name (should be ignored)
@@ -557,8 +569,129 @@ namespace Spoomples.Extensions.WildcardImporter
 
             // Edge case: variable override with no wildcard content
             AssertTransform("__(var=value)__ test",
-                           "<wcpushmacro[var]:value><wcwildcard:><wcpopmacro:var> test",
+                           "<wcpushvar[var]:value><wcpushmacro[var]:<var:var>><wcwildcard:><wcpopmacro:var><wcpopvar:var> test",
                            "Variable override with empty wildcard");
+        }
+
+        /// <summary>
+        /// A wildcard argument may legitimately contain an unbalanced '&lt;' or '&gt;' (booru
+        /// emoticon tags such as ";&lt;" or "&gt;_o"). Angle brackets are not nesting delimiters
+        /// for the "__...__" span scanner, so these must transform like any other argument
+        /// instead of being left in the file verbatim.
+        /// </summary>
+        private static void TestAngleBracketsInWildcardArgs()
+        {
+            // The value itself is base64-encoded on the way out (see TestEmoticonArgumentEncoding);
+            // what matters here is that the span is found at all and a wildcard reference results.
+            AssertTransform("__u(q=;<)__ face",
+                           "<wcpushvar[q]:<wcbase64:Ozw=>><wcpushmacro[q]:<var:q>><wcwildcard:u><wcpopmacro:q><wcpopvar:q> face",
+                           "Wildcard arg with trailing '<'");
+
+            AssertTransform("__u(q=:<)__ face",
+                           "<wcpushvar[q]:<wcbase64:Ojw=>><wcpushmacro[q]:<var:q>><wcwildcard:u><wcpopmacro:q><wcpopvar:q> face",
+                           "Wildcard arg with unbalanced '<'");
+
+            // Balanced angles always worked (the counter returned to zero); keep them covered.
+            AssertTransform("__u(q=>_<)__ face",
+                           "<wcpushvar[q]:<wcbase64:Pl88>><wcpushmacro[q]:<var:q>><wcwildcard:u><wcpopmacro:q><wcpopvar:q> face",
+                           "Wildcard arg with balanced angles");
+
+            // A '<' anywhere else on the line must not hide a later wildcard reference either.
+            AssertTransform("mood :< and __colors__",
+                           "mood :< and <wcwildcard:colors>",
+                           "Stray '<' before a plain wildcard reference");
+        }
+
+        /// <summary>
+        /// Wildcard argument values carry escaped parentheses: disambiguated booru tags such as
+        /// "night elf \(warcraft\)" and emoticon tags such as ";\)". The backwards paren matcher
+        /// that splits "name(args)" must skip escaped parens when finding the opening paren --
+        /// and must leave the backslash in the value, because ComfyUI parses bare parens as an
+        /// emphasis group.
+        /// </summary>
+        private static void TestEscapedParensInWildcardArgs()
+        {
+            // Unbalanced escaped parens: the whole reference used to become a wildcard NAME.
+            AssertTransform("__u(q=;\\()__ face",
+                           "<wcpushvar[q]:;\\(><wcpushmacro[q]:<var:q>><wcwildcard:u><wcpopmacro:q><wcpopvar:q> face",
+                           "Wildcard arg with unbalanced escaped open paren");
+
+            AssertTransform("__u(q=;\\))__ face",
+                           "<wcpushvar[q]:;\\)><wcpushmacro[q]:<var:q>><wcwildcard:u><wcpopmacro:q><wcpopvar:q> face",
+                           "Wildcard arg with unbalanced escaped close paren");
+
+            // Balanced escaped parens worked before (the miscounts cancelled) and must keep
+            // working -- these are the disambiguated booru tags. THE BACKSLASH MUST SURVIVE:
+            // a bare "night elf (warcraft)" reaching ComfyUI becomes an emphasis group.
+            AssertTransform("__u(q=night elf \\(warcraft\\))__ face",
+                           "<wcpushvar[q]:night elf \\(warcraft\\)><wcpushmacro[q]:<var:q>><wcwildcard:u><wcpopmacro:q><wcpopvar:q> face",
+                           "Wildcard arg with balanced escaped parens keeps its backslashes");
+
+            AssertTransform("__u(q=plug \\(piercing\\))__ face",
+                           "<wcpushvar[q]:plug \\(piercing\\)><wcpushmacro[q]:<var:q>><wcwildcard:u><wcpopmacro:q><wcpopvar:q> face",
+                           "Disambiguated booru tag 'plug \\(piercing\\)' keeps its backslashes");
+
+            AssertTransform("__u(q=snakebite \\(piercing\\))__ face",
+                           "<wcpushvar[q]:snakebite \\(piercing\\)><wcpushmacro[q]:<var:q>><wcwildcard:u><wcpopmacro:q><wcpopvar:q> face",
+                           "Disambiguated booru tag 'snakebite \\(piercing\\)' keeps its backslashes");
+
+            // Unescaped parens inside a value are still real nesting, not content.
+            AssertTransform("__u(q=happy (very) face)__ now",
+                           "<wcpushvar[q]:happy (very) face><wcpushmacro[q]:<var:q>><wcwildcard:u><wcpopmacro:q><wcpopvar:q> now",
+                           "Wildcard arg with unescaped nested parens");
+        }
+
+        /// <summary>
+        /// A wildcard argument value containing a literal '&lt;' or '&gt;' is base64-encoded at
+        /// emission time, because SwarmUI's tag scanner has no escape mechanism and would
+        /// otherwise mis-terminate the emitted tags. The encoding is conditional: values without
+        /// angle brackets are emitted verbatim.
+        /// This is the full table of emoticon expression tags that motivated the fix.
+        /// </summary>
+        private static void TestEmoticonArgumentEncoding()
+        {
+            void AssertEmoticon(string value, string payload)
+            {
+                AssertTransform($"__u(q={value})__ face",
+                               $"<wcpushvar[q]:<wcbase64:{payload}>><wcpushmacro[q]:<var:q>><wcwildcard:u><wcpopmacro:q><wcpopvar:q> face",
+                               $"Emoticon arg '{value}' is encoded");
+            }
+
+            AssertEmoticon(";<", "Ozw=");
+            AssertEmoticon(":<", "Ojw=");
+            AssertEmoticon(":>", "Oj4=");
+            AssertEmoticon(":>=", "Oj49");
+            AssertEmoticon(">_<", "Pl88");
+            AssertEmoticon(">_o", "Pl9v");
+            // Angle brackets AND an escaped paren: the payload encodes the ESCAPED text, so the
+            // backslash round trips.
+            AssertEmoticon(">:\\(", "PjpcKA==");
+            AssertEmoticon(">:\\)", "PjpcKQ==");
+
+            // No angle brackets, so no encoding - these two are repaired by the paren matcher fix
+            // alone, and they must stay readable in the generated wildcard file.
+            AssertTransform("__u(q=;\\()__ face",
+                           "<wcpushvar[q]:;\\(><wcpushmacro[q]:<var:q>><wcwildcard:u><wcpopmacro:q><wcpopvar:q> face",
+                           "Emoticon arg ';\\(' is not encoded");
+
+            AssertTransform("__u(q=;\\))__ face",
+                           "<wcpushvar[q]:;\\)><wcpushmacro[q]:<var:q>><wcwildcard:u><wcpopmacro:q><wcpopvar:q> face",
+                           "Emoticon arg ';\\)' is not encoded");
+
+            // Ordinary values are never encoded - blanket encoding would make the generated
+            // wildcard files unreadable for the thousands of healthy values.
+            AssertTransform("__u(q=;d)__ face",
+                           "<wcpushvar[q]:;d><wcpushmacro[q]:<var:q>><wcwildcard:u><wcpopmacro:q><wcpopvar:q> face",
+                           "Plain arg is not encoded");
+
+            AssertTransform("__u(q=night elf \\(warcraft\\))__ face",
+                           "<wcpushvar[q]:night elf \\(warcraft\\)><wcpushmacro[q]:<var:q>><wcwildcard:u><wcpopmacro:q><wcpopvar:q> face",
+                           "Escaped booru tag is not encoded and keeps its backslashes");
+
+            // Multiple overrides: each value is judged on its own.
+            AssertTransform("__u(q=:>)__ and __u(q=happy)__",
+                           "<wcpushvar[q]:<wcbase64:Oj4=>><wcpushmacro[q]:<var:q>><wcwildcard:u><wcpopmacro:q><wcpopvar:q> and <wcpushvar[q]:happy><wcpushmacro[q]:<var:q>><wcwildcard:u><wcpopmacro:q><wcpopvar:q>",
+                           "Encoding is decided per value");
         }
 
         private static void TestLabelFiltering()
@@ -680,13 +813,13 @@ namespace Spoomples.Extensions.WildcardImporter
         private static void TestIfConditions()
         {
             AssertTransform(" if foo not in (\"a\",\"b\", bar) :: value",
-                " if foo ne \"a\" and foo ne \"b\" and foo ne bar:: value",
+                " if (foo ne \"a\" and foo ne \"b\" and foo ne bar):: value",
                 "if condition with not in clause");
             AssertTransform(" if foo not in (\"a\",\"b\", bar) : value",
                 " if foo not in (\"a\",\"b\", bar) : value",
                 "if condition not processed if no ::");
             AssertTransform("{a| if foo not in (\"a\",\"b\", bar) :: value|2 if foo eq \"apple\"::value2}",
-                "<wcrandom:a|if foo ne \"a\" and foo ne \"b\" and foo ne bar:: value|2 if foo eq \"apple\"::value2>",
+                "<wcrandom:a|if (foo ne \"a\" and foo ne \"b\" and foo ne bar):: value|2 if foo eq \"apple\"::value2>",
                 "if condition inside variant processed");
         }
 
@@ -1616,7 +1749,202 @@ namespace Spoomples.Extensions.WildcardImporter
 
         #endregion
 
+        #region Test Empty Choices
+
+        /// <summary>
+        /// An empty item in a source list is a selectable choice competing on weight, not a
+        /// formatting artifact. It has to reach the generated file as something that survives
+        /// SwarmUI's blank-row filter, otherwise the slot fires every time instead of declining
+        /// at its intended rate.
+        /// </summary>
+        private static void TestEmptyChoicePreservation()
+        {
+            AssertYamlChoices(new List<object> { "red", "", "blue" },
+                              new[] { "red", "<comment:empty>", "blue" },
+                              "Empty choice in a list is preserved");
+
+            AssertYamlChoices(new List<object> { "10::red", "", "5::blue" },
+                              new[] { "10::red", "<comment:empty>", "5::blue" },
+                              "Empty choice alongside weighted choices is preserved");
+
+            AssertYamlChoices(new List<object> { "red", "   " },
+                              new[] { "red", "<comment:empty>" },
+                              "Whitespace-only choice is preserved");
+
+            AssertYamlChoices(new List<object> { "" },
+                              new[] { "<comment:empty>" },
+                              "Single empty choice is preserved");
+
+            AssertYamlChoices(new List<object> { "red", "blue" },
+                              new[] { "red", "blue" },
+                              "Lists without empty choices are unchanged");
+
+            // The marker has to come through the line transform untouched.
+            AssertTransform("<comment:empty>", "<comment:empty>", "Empty choice marker survives the line transform");
+        }
+
+        #endregion
+
+        #region Test Prompt Cleanup
+
+        /// <summary>
+        /// Clean() splits a prompt into tag and text sections and tidies the text sections. An
+        /// unmatched '&lt;' is text, not the start of a tag section - a rendered prompt can
+        /// legitimately contain one (";&lt;", ":&lt;", "&gt;_&lt;") - and treating it as a section
+        /// opener used to eat the punctuation that followed it.
+        /// </summary>
+        private static void TestCleanUnmatchedAngleBrackets()
+        {
+            AssertClean("head, ;<, tail", "head, ;<, tail",
+                        "Clean keeps the comma after an unmatched '<'");
+
+            AssertClean("head, :<, tail", "head, :<, tail",
+                        "Clean keeps the comma after a leading-colon emoticon");
+
+            AssertClean("head, >_<, tail", "head, >_<, tail",
+                        "Clean keeps the comma after a balanced-angle emoticon");
+
+            // Control: a value with only '>' never hit this path.
+            AssertClean("head, :>, tail", "head, :>, tail",
+                        "Clean is unchanged for a '>' only emoticon");
+
+            // The ordinary text cleanup still applies.
+            AssertClean("head,   ,  tail ", "head, tail",
+                        "Clean still collapses repeated commas and whitespace");
+
+            // A well-formed tag after an unmatched '<' must still be recognised as a tag and
+            // passed through untouched.
+            AssertClean("head, :<, <wcdetailer:girl  |  face>", "head, :<<wcdetailer:girl  |  face>",
+                        "Clean still recognises a tag that follows an unmatched '<'");
+
+            AssertClean("<wcdetailer:girl  |  face>", "<wcdetailer:girl  |  face>",
+                        "Clean leaves a lone tag untouched");
+        }
+
+        #endregion
+
+        #region Test Base64 Directive
+
+        /// <summary>
+        /// The &lt;wcbase64&gt; directive is how a value containing a literal '&lt;' or '&gt;'
+        /// reaches the prompt, since SwarmUI's tag scanner has no escape mechanism. Every payload
+        /// the transform emits must decode back to the exact original text, backslashes included.
+        /// </summary>
+        private static void TestBase64Directive()
+        {
+            // The ten emoticon values that need it, and the payloads the transform emits for them.
+            AssertEquals(PromptDirectives.DecodeBase64("Ozw="), ";<", "Base64 decode ';<'");
+            AssertEquals(PromptDirectives.DecodeBase64("Ojw="), ":<", "Base64 decode ':<'");
+            AssertEquals(PromptDirectives.DecodeBase64("Oj4="), ":>", "Base64 decode ':>'");
+            AssertEquals(PromptDirectives.DecodeBase64("Oj49"), ":>=", "Base64 decode ':>='");
+            AssertEquals(PromptDirectives.DecodeBase64("Pl88"), ">_<", "Base64 decode '>_<'");
+            AssertEquals(PromptDirectives.DecodeBase64("Pl9v"), ">_o", "Base64 decode '>_o'");
+            AssertEquals(PromptDirectives.DecodeBase64("O1wo"), ";\\(", "Base64 decode ';\\('");
+            AssertEquals(PromptDirectives.DecodeBase64("O1wp"), ";\\)", "Base64 decode ';\\)'");
+            AssertEquals(PromptDirectives.DecodeBase64("PjpcKA=="), ">:\\(", "Base64 decode '>:\\('");
+            AssertEquals(PromptDirectives.DecodeBase64("PjpcKQ=="), ">:\\)", "Base64 decode '>:\\)'");
+
+            // Round trip of an escaped booru tag - the backslash must come back out.
+            string tag = "night elf \\(warcraft\\)";
+            string encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(tag));
+            AssertEquals(PromptDirectives.DecodeBase64(encoded), tag, "Base64 round trip keeps backslashes");
+
+            // Empty payload is empty text, not a failure.
+            AssertEquals(PromptDirectives.DecodeBase64(""), "", "Base64 decode of empty payload");
+
+            // A bad payload reports failure (null) so the directive can warn instead of throwing.
+            AssertEquals(PromptDirectives.DecodeBase64("not base64!"), null, "Base64 decode of invalid payload");
+        }
+
+        #endregion
+
         #region Helper Methods
+
+        /// <summary>
+        /// Collects a YAML list through the private CollectYamlContent and checks the choices it
+        /// stored for that path.
+        /// </summary>
+        private static void AssertYamlChoices(List<object> yamlList, string[] expected, string testName)
+        {
+            try
+            {
+                var processor = CreateTestProcessor();
+                string taskId = "test-task";
+                var task = new ProcessingTask { Id = taskId, Prefix = "" };
+
+                var tasksField = processor.GetType().GetField("_tasks",
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                var tasks = new ConcurrentDictionary<string, ProcessingTask> { [taskId] = task };
+                tasksField?.SetValue(processor, tasks);
+
+                var method = processor.GetType().GetMethod("CollectYamlContent",
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+                if (method == null)
+                {
+                    throw new Exception("CollectYamlContent method not found");
+                }
+
+                method.Invoke(processor, new object[] { taskId, "pool", yamlList });
+
+                task.InMemoryFiles.TryGetValue("pool", out List<string> choices);
+                AssertEquals(string.Join(" | ", choices ?? new List<string>()),
+                             string.Join(" | ", expected),
+                             testName);
+            }
+            catch (Exception ex)
+            {
+                _testsFailed++;
+                string message = $"{testName}: Exception - {ex.Message}";
+                _failureMessages.Add(message);
+                Logs.Error($"✗ {message}");
+            }
+        }
+
+        /// <summary>
+        /// Runs a prompt through WildcardImporterExtension.Clean, which is private and is wired in
+        /// production through T2IParamInput.LateSpecialParameterHandlers.
+        /// </summary>
+        private static void AssertClean(string input, string expected, string testName)
+        {
+            try
+            {
+                var extension = new WildcardImporterExtension();
+                var method = typeof(WildcardImporterExtension).GetMethod("Clean",
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+                if (method == null)
+                {
+                    throw new Exception("Clean method not found");
+                }
+
+                string result = (string)method.Invoke(extension, new object[] { input });
+                AssertEquals(result, expected, testName);
+            }
+            catch (Exception ex)
+            {
+                _testsFailed++;
+                string message = $"{testName}: Exception - {ex.Message}";
+                _failureMessages.Add(message);
+                Logs.Error($"✗ {message}");
+            }
+        }
+
+        private static void AssertEquals(string actual, string expected, string testName)
+        {
+            if (actual == expected)
+            {
+                _testsPassed++;
+                Logs.Debug($"✓ {testName}: PASSED");
+            }
+            else
+            {
+                _testsFailed++;
+                string message = $"{testName}: Expected '{expected ?? "<null>"}', got '{actual ?? "<null>"}'";
+                _failureMessages.Add(message);
+                Logs.Error($"✗ {message}");
+            }
+        }
 
         private static void AssertTransform(string input, string expected, string testName,
                                           ConcurrentDictionary<string, List<string>> mockFiles = null)
@@ -1661,6 +1989,60 @@ namespace Spoomples.Extensions.WildcardImporter
                     string message = $"{testName}: Expected '{expected}', got '{result}'";
                     _failureMessages.Add(message);
                     Logs.Error($"✗ {message}");
+                }
+            }
+            catch (Exception ex)
+            {
+                _testsFailed++;
+                string message = $"{testName}: Exception - {ex.Message}";
+                _failureMessages.Add(message);
+                Logs.Error($"✗ {message}");
+            }
+        }
+
+        /// <summary>
+        /// Like <see cref="AssertTransform"/>, but also requires the transform to have raised an
+        /// import warning containing <paramref name="expectedWarning"/>. Import warnings are the
+        /// ones surfaced by the WildcardImporter UI (ProcessingTask.Warnings), as distinct from the
+        /// generation-time warnings a prompt directive tracks.
+        /// </summary>
+        private static void AssertTransformWarns(string input, string expected, string expectedWarning, string testName)
+        {
+            try
+            {
+                var processor = CreateTestProcessor();
+                string taskId = "test-task";
+                var task = new ProcessingTask { Id = taskId, Prefix = "" };
+
+                var tasksField = processor.GetType().GetField("_tasks",
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                var tasks = new ConcurrentDictionary<string, ProcessingTask> { [taskId] = task };
+                tasksField?.SetValue(processor, tasks);
+
+                var method = processor.GetType().GetMethod("ProcessWildcardLine",
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+                if (method == null)
+                {
+                    throw new Exception("ProcessWildcardLine method not found");
+                }
+
+                string result = (string)method.Invoke(processor, new object[] { input, taskId });
+                bool warned = task.Warnings.Any(w => w.Contains(expectedWarning, StringComparison.Ordinal));
+
+                if (result == expected && warned)
+                {
+                    _testsPassed++;
+                    Logs.Debug($"✓ {testName}: PASSED");
+                }
+                else
+                {
+                    _testsFailed++;
+                    string problem = result != expected
+                        ? $"Expected '{expected}', got '{result}'"
+                        : $"Expected a warning containing '{expectedWarning}', got [{string.Join(" | ", task.Warnings)}]";
+                    _failureMessages.Add($"{testName}: {problem}");
+                    Logs.Error($"✗ {testName}: {problem}");
                 }
             }
             catch (Exception ex)
@@ -1768,27 +2150,29 @@ namespace Spoomples.Extensions.WildcardImporter
         {
             // Contains operation with list (variables)
             AssertTransform("<ppp:if myvar contains (val1,val2,val3)>found<ppp:/if>",
-                           "<wcmatch:<wccase[contains(myvar, val1) or contains(myvar, val2) or contains(myvar, val3)]:found>>",
+                           "<wcmatch:<wccase[(contains(myvar, val1) or contains(myvar, val2) or contains(myvar, val3))]:found>>",
                            "If with contains list operation");
 
             // In operation with list (variables)
             AssertTransform("<ppp:if myvar in (option1,option2,option3)>in list<ppp:/if>",
-                           "<wcmatch:<wccase[myvar eq option1 or myvar eq option2 or myvar eq option3]:in list>>",
+                           "<wcmatch:<wccase[(myvar eq option1 or myvar eq option2 or myvar eq option3)]:in list>>",
                            "If with in list operation");
 
-            // Single value in parentheses (should be treated as single value)
+            // Single value in parentheses. Only "in" and "contains" take a list operand, so an
+            // "eq" operand is passed through untouched - the parentheses are simply a grouped
+            // sub-expression to the expression engine, so "(singleval)" evaluates as "singleval".
             AssertTransform("<ppp:if myvar eq (singleval)>single<ppp:/if>",
-                           "<wcmatch:<wccase[myvar eq singleval]:single>>",
+                           "<wcmatch:<wccase[myvar eq (singleval)]:single>>",
                            "If with single value in parentheses");
 
             // Mixed quoted and unquoted values in list
             AssertTransform("<ppp:if myvar contains (var1,\"literal\",var2)>mixed<ppp:/if>",
-                           "<wcmatch:<wccase[contains(myvar, var1) or contains(myvar, \"literal\") or contains(myvar, var2)]:mixed>>",
+                           "<wcmatch:<wccase[(contains(myvar, var1) or contains(myvar, \"literal\") or contains(myvar, var2))]:mixed>>",
                            "If with mixed quoted and unquoted values");
 
             // All quoted values in list
             AssertTransform("<ppp:if myvar in (\"opt1\",\"opt2\",\"opt3\")>all quoted<ppp:/if>",
-                           "<wcmatch:<wccase[myvar eq \"opt1\" or myvar eq \"opt2\" or myvar eq \"opt3\"]:all quoted>>",
+                           "<wcmatch:<wccase[(myvar eq \"opt1\" or myvar eq \"opt2\" or myvar eq \"opt3\")]:all quoted>>",
                            "If with all quoted values");
         }
 
@@ -1806,7 +2190,7 @@ namespace Spoomples.Extensions.WildcardImporter
 
             // Not with list operation
             AssertTransform("<ppp:if myvar not in (val1,val2)>not in list<ppp:/if>",
-                           "<wcmatch:<wccase[myvar ne val1 and myvar ne val2]:not in list>>",
+                           "<wcmatch:<wccase[(myvar ne val1 and myvar ne val2)]:not in list>>",
                            "If with not in list");
 
             // Not with greater than
@@ -1855,25 +2239,79 @@ namespace Spoomples.Extensions.WildcardImporter
                            "<wcmatch:<wccase[myvar invalid \"test\"]:content>>",
                            "If with invalid operation");
 
-            // Unmatched parentheses in list - should return original with warning
-            AssertTransform("<ppp:if myvar in (val1,val2>content<ppp:/if>",
+            // Unmatched parentheses in list - the block is left as written and the import warns.
+            // Converting it would emit "contains((val1,val2, myvar)", which cannot compile, so the
+            // only sign of trouble would be a generation-time warning and a branch that never fires.
+            AssertTransformWarns("<ppp:if myvar in (val1,val2>content<ppp:/if>",
                            "<ppp:if myvar in (val1,val2>content<ppp:/if>",
+                           "Unbalanced parentheses in if condition",
                            "If with unmatched parentheses");
+
+            // A closing parenthesis with nothing to close is unbalanced too, even though the counts match.
+            AssertTransformWarns("<ppp:if myvar in val1)>content<ppp:/if>",
+                           "<ppp:if myvar in val1)>content<ppp:/if>",
+                           "Unbalanced parentheses in if condition",
+                           "If with stray closing parenthesis");
+
+            // Parentheses inside a string literal are text, not structure.
+            AssertTransform("<ppp:if myvar eq \"a(b\">content<ppp:/if>",
+                           "<wcmatch:<wccase[myvar eq \"a(b\"]:content>>",
+                           "If with parenthesis inside a quoted value");
+
+            // An unterminated quote cannot be read at all - warn and leave the block alone.
+            AssertTransformWarns("<ppp:if myvar eq \"test>content<ppp:/if>",
+                           "<ppp:if myvar eq \"test>content<ppp:/if>",
+                           "Unterminated quote in if condition",
+                           "If with unterminated quote");
 
             // Empty condition
             AssertTransform("<ppp:if>content<ppp:/if>",
                            "<ppp:if>content<ppp:/if>",
                            "If with empty condition");
 
-            // Whitespace handling
+            // Whitespace handling. The condition is trimmed at both ends; whitespace inside it is
+            // left as written, since the expression engine tokenises it the same either way.
             AssertTransform("<ppp:if   myvar   eq   \"test\"  >content<ppp:/if>",
-                           "<wcmatch:<wccase[myvar eq \"test\"]:content>>",
+                           "<wcmatch:<wccase[myvar   eq   \"test\"]:content>>",
                            "If with extra whitespace");
 
-            // Case insensitive operations
-            AssertTransform("<ppp:if myvar EQ \"test\">content<ppp:/if>",
-                           "<wcmatch:<wccase[myvar eq \"test\"]:content>>",
+            // Operators are lowercase-only in the source format - the PPP grammar spells them as
+            // literals and as /eq|ne|gt|lt|ge|le|contains/ with no /i, while it does mark BOOLEAN
+            // as /true|false/i. So an uppercase operator is invalid input, not a dialect we should
+            // accept: warn about it and carry the condition over exactly as written.
+            AssertTransformWarns("<ppp:if myvar EQ \"test\">content<ppp:/if>",
+                           "<wcmatch:<wccase[myvar EQ \"test\"]:content>>",
+                           "Operator 'EQ' must be lowercase ('eq')",
                            "If with uppercase operation");
+
+            // The list/contains scanner and the "not eq" -> "ne" rewrites are all case sensitive,
+            // so every keyword shares this root cause.
+            AssertTransformWarns("<ppp:if myvar IN (val1,val2)>content<ppp:/if>",
+                           "<wcmatch:<wccase[myvar IN (val1,val2)]:content>>",
+                           "Operator 'IN' must be lowercase ('in')",
+                           "If with uppercase in operator");
+
+            AssertTransformWarns("<ppp:if myvar CONTAINS \"test\">content<ppp:/if>",
+                           "<wcmatch:<wccase[myvar CONTAINS \"test\"]:content>>",
+                           "Operator 'CONTAINS' must be lowercase ('contains')",
+                           "If with uppercase contains operator");
+
+            // Mixed case is the dangerous one: the scanner would read "NOT" as the variable name
+            // and emit contains(NOT, "test"). Nothing is rewritten now.
+            AssertTransformWarns("<ppp:if myvar NOT contains \"test\">content<ppp:/if>",
+                           "<wcmatch:<wccase[myvar NOT contains \"test\"]:content>>",
+                           "Operator 'NOT' must be lowercase ('not')",
+                           "If with uppercase not operator");
+
+            AssertTransformWarns("<ppp:if a eq 1 AND b eq 2>content<ppp:/if>",
+                           "<wcmatch:<wccase[a eq 1 AND b eq 2]:content>>",
+                           "Operator 'AND' must be lowercase ('and')",
+                           "If with uppercase and operator");
+
+            // A keyword spelling inside a string literal is a value, not an operator.
+            AssertTransform("<ppp:if myvar eq \"IN\">content<ppp:/if>",
+                           "<wcmatch:<wccase[myvar eq \"IN\"]:content>>",
+                           "If with uppercase keyword inside a quoted value");
 
             // Variable with special characters
             AssertTransform("<ppp:if my_var-123 eq \"test\">content<ppp:/if>",

@@ -196,6 +196,22 @@ namespace Spoomples.Extensions.WildcardImporter
             {
                 if (prompt[i] == '<')
                 {
+                    // A '<' only opens a tag section if it actually closes. An unmatched '<' is
+                    // ordinary text - a prompt can legitimately contain one (the emoticon tags
+                    // ";<", ":<", ">_<"). Check for the closing '>' BEFORE splitting the text,
+                    // otherwise the surrounding text is cut into separate segments and the
+                    // per-segment cleanup trims the punctuation between them: "head, ;<, tail"
+                    // used to come out as "head, ;<tail".
+                    var tagInfo = FindCompleteTag(prompt, i);
+
+                    if (!tagInfo.IsComplete)
+                    {
+                        // Not a tag - keep it in the current text segment and carry on scanning,
+                        // so a later well-formed tag on the same line is still recognised.
+                        i++;
+                        continue;
+                    }
+
                     // Found start of a tag, process any text before it
                     if (i > textStart)
                     {
@@ -203,23 +219,9 @@ namespace Spoomples.Extensions.WildcardImporter
                         segments.Add(new PromptSegment(textSegment, false));
                     }
 
-                    // Find the end of the tag, handling nested tags
-                    var tagInfo = FindCompleteTag(prompt, i);
-
-                    if (tagInfo.IsComplete)
-                    {
-                        segments.Add(new PromptSegment(tagInfo.Content, true));
-                        i = tagInfo.EndIndex;
-                        textStart = i;
-                    }
-                    else
-                    {
-                        // Unclosed tag - treat the '<' as regular text
-                        string textSegment = prompt.Substring(i, 1);
-                        segments.Add(new PromptSegment(textSegment, false));
-                        textStart = i + 1;
-                        i = i + 1;
-                    }
+                    segments.Add(new PromptSegment(tagInfo.Content, true));
+                    i = tagInfo.EndIndex;
+                    textStart = i;
                 }
                 else
                 {

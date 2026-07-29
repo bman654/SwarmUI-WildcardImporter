@@ -203,6 +203,26 @@ namespace Spoomples.Extensions.WildcardImporter
             Logs.Debug($"YAML file contents collected: {yamlPath}");
         }
 
+        /// <summary>
+        /// Keeps an empty choice selectable.
+        /// <para>
+        /// An empty item in a source list is a real choice: it competes on weight with its
+        /// siblings and means "this slot produces nothing this time". Written out as a blank line
+        /// it would be lost, because SwarmUI's wildcard loader discards blank rows before the
+        /// choice set is built (WildcardsHelper.GetWildcard filters on IsNullOrWhiteSpace) - so
+        /// the slot would fire every time instead of declining at its intended rate. Emitting
+        /// &lt;comment:empty&gt; survives the filter and still renders as nothing.
+        /// </para>
+        /// <para>
+        /// Only list items from structured (YAML) sources go through here. Blank lines in an
+        /// imported plain text wildcard file are formatting, not choices, and are left alone.
+        /// </para>
+        /// </summary>
+        private static string PreserveEmptyChoice(string item)
+        {
+            return string.IsNullOrWhiteSpace(item) ? "<comment:empty>" : item;
+        }
+
         private void CollectYamlContent(string taskId, string currentPath, object currentValue)
         {
             Logs.Debug($"Collecting YAML content: {currentPath}");
@@ -242,7 +262,7 @@ namespace Spoomples.Extensions.WildcardImporter
                 if (currentList.Count == 1 && currentList[0] is string singleItem)
                 {
                     // Store in memory with path structure
-                    task.InMemoryFiles.TryAdd(currentPath, new List<string> { singleItem });
+                    task.InMemoryFiles.TryAdd(currentPath, new List<string> { PreserveEmptyChoice(singleItem) });
                 }
                 else
                 {
@@ -251,7 +271,7 @@ namespace Spoomples.Extensions.WildcardImporter
                     {
                         if (item is string stringItem)
                         {
-                            stringList.Add(stringItem);
+                            stringList.Add(PreserveEmptyChoice(stringItem));
                         }
                         else if (item is List<object>)
                         {
@@ -368,10 +388,12 @@ namespace Spoomples.Extensions.WildcardImporter
 
                 // Process each line in the file
                 List<string> processedLines = new List<string>();
+                task.CurrentFile = filePath;
                 foreach (var line in lines)
                 {
                     processedLines.Add(ProcessWildcardLine(line, taskId));
                 }
+                task.CurrentFile = null;
 
                 // Regular text file
                 string outputPath = Path.Combine(destinationFolder, task.Prefix + filePath);
@@ -392,8 +414,14 @@ namespace Spoomples.Extensions.WildcardImporter
 
         private string ProcessWildcards(string line, string taskId)
         {
-            var openChars = new[] { '{', '<', '(' };
-            var closeChars = new[] { '}', '>', ')' };
+            // '<' and '>' are deliberately NOT tracked as nesting delimiters here.
+            // At this point in the pipeline the line is still raw PPP source, so any angle
+            // bracket it contains is content (an emoticon like ":<" or ">_o"), not structure.
+            // Tracking them meant an unbalanced angle bracket left FindTopLevelChar's nesting
+            // counter permanently non-zero, so the closing "__" of the span was never found and
+            // the whole __wildcard(arg)__ reference was emitted verbatim.
+            var openChars = new[] { '{', '(' };
+            var closeChars = new[] { '}', ')' };
             int pos = 0;
             while ((pos = line.IndexOf("__", pos, StringComparison.Ordinal)) != -1)
             {
@@ -551,7 +579,10 @@ namespace Spoomples.Extensions.WildcardImporter
             if (ifMatch.Success)
             {
                 var ifExpr = ifMatch.Groups["expr"].Value;
-                opts = $"{opts.Substring(0, ifMatch.Index).Trim()} if {ProcessCondition(ifExpr, task)}";
+                // A condition we could not read is left exactly as written (ProcessCondition has
+                // already warned about it); dropping it would leave a dangling "if" behind.
+                string processedIfExpr = ProcessCondition(ifExpr, task) ?? ifExpr;
+                opts = $"{opts.Substring(0, ifMatch.Index).Trim()} if {processedIfExpr}";
             }
 
             // Check for single quotes: 'labels'
@@ -1587,6 +1618,20 @@ namespace Spoomples.Extensions.WildcardImporter
 
                 for (int i = content.Length - 1; i >= 0; i--)
                 {
+                    // An escaped paren is literal content, not structure, so it must not move the
+                    // nesting count. Booru tags routinely carry them ("plug \(piercing\)") and so
+                    // do emoticon tags (";\)"); the balanced ones only worked because the two
+                    // miscounts cancelled, while an unbalanced one made the whole "name(args)"
+                    // string get treated as a wildcard name. FindTopLevelChar already skips
+                    // escaped characters the same way.
+                    //
+                    // IMPORTANT: this is BOUNDARY DETECTION ONLY - it must never unescape.
+                    // We skip over the escaped character when deciding where the argument list
+                    // begins; the backslash stays in the value that is handed to
+                    // ParseVariableAssignments and emitted into the wildcard file. Consuming it
+                    // here would silently turn every disambiguated booru tag into a ComfyUI
+                    // emphasis group -- a corruption with no error message.
+                    if (i > 0 && content[i - 1] == '\\') { continue; }
                     if (content[i] == ')')
                     {
                         parenCount++;
@@ -1796,7 +1841,7 @@ namespace Spoomples.Extensions.WildcardImporter
                 // Add push variables and push macros for each variable (in order)
                 foreach (var (varName, varValue) in variableOverrides)
                 {
-                    result += $"<wcpushvar[{varName}]:{varValue}><wcpushmacro[{varName}]:<var:{varName}>>";
+                    result += $"<wcpushvar[{varName}]:{EncodeValueIfNeeded(varValue)}><wcpushmacro[{varName}]:<var:{varName}>>";
                 }
 
                 // Add the base wildcard result
@@ -1812,6 +1857,34 @@ namespace Spoomples.Extensions.WildcardImporter
             }
 
             return baseResult;
+        }
+
+        /// <summary>
+        /// Wraps a wildcard argument value in a &lt;wcbase64&gt; directive when it contains a
+        /// literal '&lt;' or '&gt;'.
+        /// <para>
+        /// SwarmUI's prompt parser scans tags with a plain '&lt;'..'&gt;' delimiter scanner that has
+        /// no escape mechanism, so an angle bracket inside a tag value corrupts the surrounding
+        /// tags: a '&gt;' closes the tag early, a '&lt;' stops it closing. Booru emoticon tags
+        /// (";&lt;", ":&gt;", "&gt;_o", ...) are exactly that shape. Encoding the value keeps the
+        /// emitted tag well formed; &lt;wcbase64&gt; decodes it back before it is stored, so the
+        /// variable holds the real text.
+        /// </para>
+        /// <para>
+        /// The encoding is deliberately conditional. Values without angle brackets are emitted
+        /// as-is, both to keep the generated wildcard files readable and because a value may
+        /// legitimately contain source syntax that later transform stages still need to see.
+        /// The value is encoded exactly as it stands, escapes included, so an escaped booru tag
+        /// round trips byte for byte.
+        /// </para>
+        /// </summary>
+        private static string EncodeValueIfNeeded(string value)
+        {
+            if (value is null || (!value.Contains('<') && !value.Contains('>')))
+            {
+                return value;
+            }
+            return $"<wcbase64:{Convert.ToBase64String(Encoding.UTF8.GetBytes(value))}>";
         }
 
         /// <summary>
@@ -2450,6 +2523,133 @@ namespace Spoomples.Extensions.WildcardImporter
             return result;
         }
 
+        /// <summary>What to do with a condition after <see cref="ValidateCondition"/> has looked at it.</summary>
+        private enum ConditionVerdict
+        {
+            /// <summary>Well formed as far as we can tell; convert it.</summary>
+            Convert,
+            /// <summary>Not valid source syntax, but harmless to carry over verbatim; emit it as written.</summary>
+            EmitVerbatim,
+            /// <summary>Cannot be read at all; the whole if block is left as written.</summary>
+            Unconvertible,
+        }
+
+        /// <summary>
+        /// Keywords the PPP condition grammar spells as lowercase literals. The grammar writes
+        /// them as "and"/"or"/"not" and /eq|ne|gt|lt|ge|le|contains/ and /contains|in/ - none of
+        /// those carry the /i flag that the same grammar does put on BOOLEAN - so an uppercase
+        /// spelling is invalid in the file we are importing, not merely unsupported here.
+        /// </summary>
+        private static readonly HashSet<string> ConditionKeywords = new(StringComparer.Ordinal)
+        {
+            "eq", "ne", "gt", "lt", "ge", "le", "contains", "in", "not", "and", "or"
+        };
+
+        private static readonly Regex ConditionWordRE = new(@"[A-Za-z_][A-Za-z0-9_]*", RegexOptions.Compiled);
+
+        /// <summary>
+        /// Returns a copy of <paramref name="text"/> with every quoted span blanked out, so that a
+        /// parenthesis or a keyword-looking word inside a string literal is not mistaken for syntax.
+        /// Positions are preserved (each masked character becomes a space).
+        /// </summary>
+        private static string MaskQuotedSpans(string text, out bool unterminatedQuote)
+        {
+            char[] buf = text.ToCharArray();
+            char quote = '\0';
+            for (int i = 0; i < text.Length; i++)
+            {
+                char c = text[i];
+                if (quote == '\0')
+                {
+                    if (c == '"' || c == '\'')
+                    {
+                        quote = c;
+                        buf[i] = ' ';
+                    }
+                }
+                else
+                {
+                    buf[i] = ' ';
+                    if (c == quote && !IsBackslashEscaped(text, i))
+                    {
+                        quote = '\0';
+                    }
+                }
+            }
+            unterminatedQuote = quote != '\0';
+            return new string(buf);
+        }
+
+        /// <summary>True if the character at <paramref name="index"/> is preceded by an odd number of backslashes.</summary>
+        private static bool IsBackslashEscaped(string text, int index)
+        {
+            int backslashes = 0;
+            for (int i = index - 1; i >= 0 && text[i] == '\\'; i--)
+            {
+                backslashes++;
+            }
+            return (backslashes % 2) == 1;
+        }
+
+        /// <summary>
+        /// Checks a condition for the malformations that would otherwise produce a wccase
+        /// expression that cannot compile, and warns about them at import time.
+        /// <para>
+        /// Import warnings are shown in the WildcardImporter UI; a bad condition that gets written
+        /// out anyway only complains during prompt generation, where the message is easy to miss
+        /// and all the user sees is a branch that never fires. So we report here and, deliberately,
+        /// do not try to guess what was meant - nothing is rewritten or repaired.
+        /// </para>
+        /// </summary>
+        private ConditionVerdict ValidateCondition(string condition, ProcessingTask task)
+        {
+            string where = string.IsNullOrEmpty(task.CurrentFile) ? "" : $" in {task.CurrentFile}";
+            string masked = MaskQuotedSpans(condition, out bool unterminatedQuote);
+
+            if (unterminatedQuote)
+            {
+                task.AddWarning($"Unterminated quote in if condition{where}, leaving it unconverted: {condition}");
+                return ConditionVerdict.Unconvertible;
+            }
+
+            int depth = 0;
+            bool balanced = true;
+            foreach (char c in masked)
+            {
+                if (c == '(')
+                {
+                    depth++;
+                }
+                else if (c == ')')
+                {
+                    depth--;
+                    if (depth < 0)
+                    {
+                        balanced = false;
+                        break;
+                    }
+                }
+            }
+            if (!balanced || depth != 0)
+            {
+                task.AddWarning($"Unbalanced parentheses in if condition{where}, leaving it unconverted: {condition}");
+                return ConditionVerdict.Unconvertible;
+            }
+
+            foreach (Match word in ConditionWordRE.Matches(masked))
+            {
+                string lower = word.Value.ToLowerInvariant();
+                if (lower == word.Value || !ConditionKeywords.Contains(lower))
+                {
+                    continue;
+                }
+                task.AddWarning($"Operator '{word.Value}' must be lowercase ('{lower}'){where}, leaving the condition unconverted: {condition}");
+                return ConditionVerdict.EmitVerbatim;
+            }
+
+            return ConditionVerdict.Convert;
+        }
+
         /// <summary>
         /// Processes a condition expression and converts it to wccase syntax.
         /// </summary>
@@ -2459,6 +2659,18 @@ namespace Spoomples.Extensions.WildcardImporter
 
             if (string.IsNullOrWhiteSpace(condition))
                 return null;
+
+            switch (ValidateCondition(condition, task))
+            {
+                case ConditionVerdict.Unconvertible:
+                    return null;
+                case ConditionVerdict.EmitVerbatim:
+                    // The operator rewriting below is all case sensitive, so running it over a
+                    // condition with an uppercase operator would half-apply: it would leave
+                    // "myvar EQ x" alone but read the "NOT" of "myvar NOT contains x" as the
+                    // variable name. Emit what the user wrote instead of a mangled version of it.
+                    return condition;
+            }
 
             // replace some operators
             condition = condition
@@ -2892,6 +3104,10 @@ namespace Spoomples.Extensions.WildcardImporter
         public ProcessingStatusEnum Status;
         public ConcurrentBag<string> Errors = new();
         public List<string> Warnings = new();
+
+        /// <summary>The wildcard file currently being processed, so a warning can say where it came
+        /// from. Null outside <see cref="WildcardProcessor.ProcessCollectedFiles"/>.</summary>
+        public string CurrentFile;
 
         public void AddWarning(string warning)
         {
