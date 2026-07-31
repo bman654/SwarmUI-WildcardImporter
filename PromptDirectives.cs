@@ -176,6 +176,7 @@ namespace Spoomples.Extensions.WildcardImporter
                 try
                 {
                     var magesEngine = GetEngine(context);
+                    PromptTagContextDictionary.CurrentExpression = ConditionExpression;
                     var exprResult = magesEngine.Compile($"any({ConditionExpression})")();
                     return exprResult is true;
                 }
@@ -615,6 +616,7 @@ namespace Spoomples.Extensions.WildcardImporter
                 {
                     // parse the expression and see if it is truthy
                     var magesEngine = GetEngine(context);
+                    PromptTagContextDictionary.CurrentExpression = expr;
                     var exprResult = magesEngine.Compile($"any({expr})")();
                     var isMatch = exprResult is true;
                     if (isMatch)
