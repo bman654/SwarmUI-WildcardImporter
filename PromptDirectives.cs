@@ -555,6 +555,7 @@ namespace Spoomples.Extensions.WildcardImporter
                 }
 
                 data = context.Parse(data);
+                PromptTagContextDictionary.WarnIfAppendToUnknown(context, "wcaddvar", name);
                 var currentValue = context.Variables.GetValueOrDefault(name, "");
                 context.Variables[name] = mode?.ToLowerFast() == "prepend" ? $"{data}{currentValue}" : $"{currentValue}{data}";
                 return "";
@@ -578,6 +579,7 @@ namespace Spoomples.Extensions.WildcardImporter
                     context.TrackWarning($"A macro name is required when using wcaddmacro.");
                     return null;
                 }
+                PromptTagContextDictionary.WarnIfAppendToUnknown(context, "wcaddmacro", name);
                 var currentValue = context.Macros.GetValueOrDefault(name, "");
                 context.Macros[name] = mode?.ToLowerFast() == "prepend" ? $"{data}{currentValue}" : $"{currentValue}{data}";
                 return "";

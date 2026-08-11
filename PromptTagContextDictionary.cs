@@ -47,6 +47,34 @@
                 $@"length\s*\(\s*{System.Text.RegularExpressions.Regex.Escape(key)}\s*\)\s*(eq|==)\s*0");
         }
 
+        /// <summary>
+        /// The WRITE half of <see cref="WarnOnMissingKey"/>, and it needs its own hook because the
+        /// append path never reaches the read fallback above.
+        ///
+        /// `${x+=v}` transforms to <c>&lt;wcaddmacro[x]:, v&gt;</c>, whose handler resolves the
+        /// current value with <c>GetValueOrDefault(name, "")</c> — a direct dictionary call that
+        /// bypasses <c>TryGetValue</c> entirely. So appending to a name nothing ever set silently
+        /// CREATES it, while Python PPP reports `Unknown variable x` and stops. That gap is not
+        /// hypothetical: it is what let a studio69 posture probe publish `${plimb+=legs}` against an
+        /// unseeded ledger and stay green on this engine for a month while failing on PPP.
+        ///
+        /// A name counts as known if EITHER dictionary holds it. studio69's `${x=!v}` writes a
+        /// variable and a macro, its `${x=v}` writes only a macro, and either is a legitimate
+        /// prior initialisation — checking one alone would warn on the other's idiom.
+        ///
+        /// No `${x?=default}`-style exemption applies here. Reading an unset name can be the guard
+        /// idiom; APPENDING to one is the mistake in every case, which is exactly why PPP is
+        /// unconditional about it.
+        /// </summary>
+        public static void WarnIfAppendToUnknown(T2IPromptHandling.PromptTagContext context, string directive, string name)
+        {
+            if (!WarnOnMissingKey || context is null || string.IsNullOrWhiteSpace(name)) { return; }
+            if (context.Variables.ContainsKey(name) || context.Macros.ContainsKey(name)) { return; }
+            context.TrackWarning(
+                $"Unknown user variable '{name}' appended to via {directive} - it has no macro or "
+                + "variable, so the append creates it from empty. Initialise it first.");
+        }
+
         /// <summary>The condition currently being evaluated, for OnMissingKey's benefit. Set by
         /// PromptDirectives around each Mages compile/invoke; thread-static because conditions can
         /// be evaluated concurrently.</summary>
