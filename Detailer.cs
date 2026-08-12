@@ -373,7 +373,8 @@ public static class Detailer
         
         WorkflowGeneratorSteps.AddStep(g => 
         { 
-            PromptRegion.Part[] parts = [.. new PromptRegion(g.UserInput.Get(T2IParamTypes.Prompt, "")).Parts.Where(p => p.Type == PromptRegion.PartType.CustomPart && p.Prefix == DIRECTIVE)];
+            PromptRegion positiveRegion = new(g.UserInput.Get(T2IParamTypes.Prompt, ""));
+            PromptRegion.Part[] parts = [.. positiveRegion.Parts.Where(p => p.Type == PromptRegion.PartType.CustomPart && p.Prefix == DIRECTIVE)];
             if (!parts.IsEmpty())
             {
                 if (g.UserInput.Get(T2IParamTypes.OutputIntermediateImages, false))
@@ -457,8 +458,16 @@ public static class Detailer
                     {
                         (model, clip) = g.LoadLorasForConfinement(part.ContextID, g.FinalModel, clip);
                     }
-                    JArray prompt = g.CreateConditioning(part.Prompt, clip, t2iModel, true);
-                    string neg = negativeParts.FirstOrDefault(p => p.DataText == part.DataText)?.Prompt ?? negativeRegion.GlobalPrompt;
+                    // PromptRegion substitutes the global prompt into a tag that carries no prompt of its own, but it
+                    // does that only for PartType.Segment. A custom part is left empty, so an unadorned
+                    // '<wcdetailer:mask>' would condition the detail pass on nothing at all.
+                    string pos = string.IsNullOrWhiteSpace(part.Prompt) ? positiveRegion.GlobalPrompt : part.Prompt;
+                    JArray prompt = g.CreateConditioning(pos, clip, t2iModel, true);
+                    string neg = negativeParts.FirstOrDefault(p => p.DataText == part.DataText)?.Prompt;
+                    if (string.IsNullOrWhiteSpace(neg))
+                    {
+                        neg = negativeRegion.GlobalPrompt;
+                    }
                     JArray negPrompt = g.CreateConditioning(neg, clip, t2iModel, false);
 
                     int steps = g.UserInput.GetNullable(T2IParamTypes.Steps, part.ContextID, false) ?? g.UserInput.GetNullable(DetailSteps, part.ContextID) ?? g.UserInput.GetNullable(T2IParamTypes.RefinerSteps, part.ContextID) ?? g.UserInput.Get(T2IParamTypes.Steps, 20, sectionId: part.ContextID);
