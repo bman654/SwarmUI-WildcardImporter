@@ -310,7 +310,7 @@ public static class Detailer
     }
 
     private static T2IRegisteredParam<bool> DetailDynamicResolution;
-    private static T2IRegisteredParam<string> DetailSortOrder, DetailTargetResolution, SaveDetailMask;
+    private static T2IRegisteredParam<string> DetailSortOrder, DetailTargetResolution, SaveDetailMask, DetailApplyAfter;
     private static T2IRegisteredParam<int> DetailMaskBlur, DetailMaskGrow, DetailMaskOversize, DetailSteps, DetailFeatureThreshold;
     private static T2IRegisteredParam<double> DetailThresholdMax, DetailCFGScale;
     private static T2IRegisteredParam<T2IModel> DetailModel;
@@ -338,6 +338,9 @@ public static class Detailer
             ));
         DetailThresholdMax = T2IParamTypes.Register<double>(new("WC Detail Threshold Max", "Maximum mask match value of a detail mask before clamping.\nLower values force more of the mask to be counted as maximum masking.\nToo-low values may include unwanted areas of the image.\nHigher values may soften the mask.",
             "1", Min: 0, Max: 1, Step: 0.05, Toggleable: true, ViewType: ParamViewType.SLIDER, Group: GroupDetailRefining, OrderPriority: 6
+            ));
+        DetailApplyAfter = T2IParamTypes.Register<string>(new("WC Detail Apply After", $"When to apply '<{DIRECTIVE}:>' processing.\n'Refiner' (default) applies it after the refiner step.\n'Base' applies it after the base sampler but before the refiner, allowing the refiner to then blend and refine the detailed areas.",
+            "Refiner", IgnoreIf: "Refiner", GetValues: _ => ["Base", "Refiner"], Group: GroupDetailRefining, OrderPriority: 8
             ));
         DetailSortOrder = T2IParamTypes.Register<string>(new("WC Detail Sort Order", $"How to sort detail mask features when using '<{DIRECTIVE}:somemask[1]' syntax with indices.\nFor example: <{DIRECTIVE}:yolo-face_yolov8m-seg_60.pt[2]> with largest-smallest, will select the second largest face feature.",
             "left-right", IgnoreIf: "left-right", GetValues: _ => ["left-right", "right-left", "top-bottom", "bottom-top", "largest-smallest", "smallest-largest"], Group: GroupDetailRefining, OrderPriority: 7
@@ -371,134 +374,168 @@ public static class Detailer
         Logs.Init($"Adding {NodeFolder} to CustomNodePaths");
         AddT2IParameters();
         
-        WorkflowGeneratorSteps.AddStep(g => 
-        { 
-            PromptRegion positiveRegion = new(g.UserInput.Get(T2IParamTypes.Prompt, ""));
-            PromptRegion.Part[] parts = [.. positiveRegion.Parts.Where(p => p.Type == PromptRegion.PartType.CustomPart && p.Prefix == DIRECTIVE)];
-            if (!parts.IsEmpty())
+        // Two registrations sharing one body, each declining unless it is the selected stage. This is the
+        // shape the built-in <segment> uses for its own apply-after option; the step priority is the only
+        // thing that differs between the two.
+        WorkflowGeneratorSteps.AddStep(g =>
+        {
+            if (g.UserInput.Get(DetailApplyAfter, "Refiner") != "Base")
             {
-                g.CurrentMedia = g.CurrentMedia.AsRawImage(g.CurrentVae);
-                if (g.UserInput.Get(T2IParamTypes.OutputIntermediateImages, false))
-                {
-                    g.CurrentMedia.SaveOutput(g.CurrentVae, g.CurrentAudioVae, id: g.GetStableDynamicID(50000, 0));
-                }
-                T2IModel t2iModel = g.FinalLoadedModel;
-                WGNodeData model = g.CurrentModel, clip = g.CurrentTextEnc, vae = g.CurrentVae;
-                if (g.UserInput.TryGet(DetailModel, out T2IModel segmentModel))
-                {
-                    // NoVAEOverride tells the loader not to trust the user's VAE pick for a model of a different
-                    // compatibility class. It belongs to this one load: leaving it set applied it to every later
-                    // load in the workflow as well.
-                    g.NoVAEOverride = segmentModel.ModelClass?.CompatClass != t2iModel.ModelClass?.CompatClass;
-                    t2iModel = segmentModel;
-                    g.FinalLoadedModel = segmentModel;
-                    (t2iModel, model, clip, vae) = g.CreateModelLoader(t2iModel, "Refiner", sectionId: parts[0].ContextID);
-                    g.FinalLoadedModel = t2iModel;
-                    g.CurrentModel = model;
-                    g.NoVAEOverride = false;
-                }
-                PromptRegion negativeRegion = new(g.UserInput.Get(T2IParamTypes.NegativePrompt, ""));
-                PromptRegion.Part[] negativeParts = [.. negativeRegion.Parts.Where(p => p.Type == PromptRegion.PartType.CustomPart && p.Prefix == DIRECTIVE)];
-                int growAmt = g.UserInput.Get(DetailMaskGrow, 16);
-                for (int i = 0; i < parts.Length; i++)
-                {
-                    PromptRegion.Part part = parts[i];
-                    DetailerParams detailerParams;
-                    MaskSpecifier maskSpec;
-                    try
-                    {
-                        (detailerParams, string maskSpecString) = ParseDetailerParams(g, part.DataText);
-                        maskSpec = ParseMaskSpecifier(maskSpecString);
-                    }
-                    catch (Exception ex)
-                    {
-                        Logs.Error($"Error parsing {DIRECTIVE} '<{DIRECTIVE}:{part.DataText}>': " + ex.Message);
-                        continue;
-                    }
-                    string segmentNode = GenerateMaskNodes(g, maskSpec);
-                    if (detailerParams.Blur > 0)
-                    {
-                        segmentNode = g.CreateNode("SwarmMaskBlur", new JObject()
-                        {
-                            ["mask"] = new JArray() { segmentNode, 0 },
-                            ["blur_radius"] = detailerParams.Blur,
-                            ["sigma"] = 1
-                        });
-                    }
-                    // grow if top-level mask does not have a grow modifier
-                    if (growAmt > 0 && !(maskSpec is GrowMask))
-                    {
-                        segmentNode = g.CreateNode("GrowMask", new JObject()
-                        {
-                            ["mask"] = new JArray() { segmentNode, 0 },
-                            ["expand"] = growAmt,
-                            ["tapered_corners"] = true
-                        });
-                    }
-                    var saveDetailMask = g.UserInput.Get(SaveDetailMask, "Disabled");
-                    if (saveDetailMask == "MaskOnly")
-                    {
-                        string imageNode = g.CreateNode("MaskToImage", new JObject()
-                        {
-                            ["mask"] = new JArray() { segmentNode, 0 }
-                        });
-                        new WGNodeData([imageNode, 0], g, WGNodeData.DT_IMAGE, g.CurrentCompat()).SaveOutput(null, null, g.GetStableDynamicID(50000, 0));
-                    }
-                    else if (saveDetailMask == "MaskAndImage")
-                    {
-                        string imageNode = g.CreateNode("WCMaskOverlay", new JObject()
-                        {
-                            ["image"] = g.CurrentMedia.Path,
-                            ["mask"] = new JArray() { segmentNode, 0 }
-                        });
-                        new WGNodeData([imageNode, 0], g, WGNodeData.DT_IMAGE, g.CurrentCompat()).SaveOutput(null, null, g.GetStableDynamicID(50000, 0));
-                    }
-                    int oversize = g.UserInput.Get(DetailMaskOversize, 16);
-                    g.MaskShrunkInfo = CreateImageMaskCrop(g, [segmentNode, 0], g.CurrentMedia.Path, oversize, vae.Path, g.FinalLoadedModel, thresholdMax: g.UserInput.Get(DetailThresholdMax, 1));
-                    g.EnableDifferential();
-                    // EnableDifferential replaces CurrentModel rather than mutating it, so the local has to be
-                    // re-read. Without this the DifferentialDiffusion node is emitted but never reaches the
-                    // sampler, and the patch only took effect on the branch below that happened to re-read it.
-                    model = g.CurrentModel;
-                    if (part.ContextID > 0)
-                    {
-                        (JArray loraModel, JArray loraClip) = g.LoadLorasForConfinement(part.ContextID, model.Path, clip.Path);
-                        model = model.WithPath(loraModel);
-                        clip = clip.WithPath(loraClip);
-                    }
-                    // PromptRegion substitutes the global prompt into a tag that carries no prompt of its own, but it
-                    // does that only for PartType.Segment. A custom part is left empty, so an unadorned
-                    // '<wcdetailer:mask>' would condition the detail pass on nothing at all.
-                    string pos = string.IsNullOrWhiteSpace(part.Prompt) ? positiveRegion.GlobalPrompt : part.Prompt;
-                    JArray prompt = g.CreateConditioning(pos, clip.Path, t2iModel, true);
-                    string neg = negativeParts.FirstOrDefault(p => p.DataText == part.DataText)?.Prompt;
-                    if (string.IsNullOrWhiteSpace(neg))
-                    {
-                        neg = negativeRegion.GlobalPrompt;
-                    }
-                    JArray negPrompt = g.CreateConditioning(neg, clip.Path, t2iModel, false);
-
-                    int steps = g.UserInput.GetNullable(T2IParamTypes.Steps, part.ContextID, false) ?? g.UserInput.GetNullable(DetailSteps, part.ContextID) ?? g.UserInput.GetNullable(T2IParamTypes.RefinerSteps, part.ContextID) ?? g.UserInput.Get(T2IParamTypes.Steps, 20, sectionId: part.ContextID);
-                    int startStep = (int)Math.Round(steps * (1 - detailerParams.Creativity));
-                    long seed = g.UserInput.Get(T2IParamTypes.Seed) + 2 + i;
-                    double cfg = g.UserInput.GetNullable(T2IParamTypes.CFGScale, part.ContextID, false) ?? g.UserInput.GetNullable(DetailCFGScale, part.ContextID) ?? g.UserInput.GetNullable(T2IParamTypes.RefinerCFGScale, part.ContextID) ?? g.UserInput.Get(T2IParamTypes.CFGScale, 7, sectionId: part.ContextID);
-                    WGNodeData beforeImage = g.CurrentMedia;
-                    string sampler = g.CreateKSampler(model.Path, prompt, negPrompt, [g.MaskShrunkInfo.MaskedLatent, 0], cfg, steps, startStep, 10000, seed, false, true, sectionId: part.ContextID);
-                    g.CurrentMedia = g.CurrentMedia.WithPath([sampler, 0], WGNodeData.DT_LATENT_IMAGE).AsRawImage(vae);
-                    JArray recompositedImage = g.RecompositeCropped(g.MaskShrunkInfo.BoundsNode, [g.MaskShrunkInfo.CroppedMask, 0], beforeImage.Path, g.CurrentMedia.Path);
-                    string conditionalImage = g.CreateNode("WCSkipIfMaskEmpty", new JObject()
-                    {
-                        ["mask"] = new JArray() { segmentNode, 0 },
-                        ["image_if_empty"] = beforeImage.Path,
-                        ["image_if_not_empty"] = recompositedImage,
-                    });
-                    g.CurrentMedia = beforeImage.WithPath([conditionalImage, 0], WGNodeData.DT_IMAGE);
-                    g.MaskShrunkInfo = new(null, null, null, null);
-                }
+                return;
             }
+            RunDetailerProcessing(g);
+        },
+            // after the base sampler, before the refiner
+            -4.5);
+        WorkflowGeneratorSteps.AddStep(g =>
+        {
+            if (g.UserInput.Get(DetailApplyAfter, "Refiner") != "Refiner")
+            {
+                return;
+            }
+            RunDetailerProcessing(g);
         },
             // same priority as <segment>
             5);
+    }
+
+    private static void RunDetailerProcessing(WorkflowGenerator g)
+    {
+        PromptRegion positiveRegion = new(g.UserInput.Get(T2IParamTypes.Prompt, ""));
+        PromptRegion.Part[] parts = [.. positiveRegion.Parts.Where(p => p.Type == PromptRegion.PartType.CustomPart && p.Prefix == DIRECTIVE)];
+        if (!parts.IsEmpty())
+        {
+            g.CurrentMedia = g.CurrentMedia.AsRawImage(g.CurrentVae);
+            if (g.UserInput.Get(T2IParamTypes.OutputIntermediateImages, false))
+            {
+                g.CurrentMedia.SaveOutput(g.CurrentVae, g.CurrentAudioVae, id: g.GetStableDynamicID(50000, 0));
+            }
+            // In "Base" mode this runs before the priority-1 mask-shrink recomposite, so a MaskShrunkInfo that
+            // is already pending belongs to the init-image workflow. Clearing it, as this used to, would drop
+            // that recomposite and leave the output at the detail crop's size instead of the full image.
+            WorkflowGenerator.ImageMaskCropData priorMaskShrink = g.MaskShrunkInfo;
+            // Likewise the model state: only CurrentModel is ever written back below, so leaving a detail model
+            // in place hands every later step that model paired with the base model's text encoder and VAE.
+            T2IModel priorLoadedModel = g.FinalLoadedModel;
+            WGNodeData priorModel = g.CurrentModel, priorTextEnc = g.CurrentTextEnc, priorVae = g.CurrentVae;
+            T2IModel t2iModel = g.FinalLoadedModel;
+            WGNodeData model = g.CurrentModel, clip = g.CurrentTextEnc, vae = g.CurrentVae;
+            if (g.UserInput.TryGet(DetailModel, out T2IModel segmentModel))
+            {
+                // NoVAEOverride tells the loader not to trust the user's VAE pick for a model of a different
+                // compatibility class. It belongs to this one load: leaving it set applied it to every later
+                // load in the workflow as well.
+                g.NoVAEOverride = segmentModel.ModelClass?.CompatClass != t2iModel.ModelClass?.CompatClass;
+                t2iModel = segmentModel;
+                g.FinalLoadedModel = segmentModel;
+                (t2iModel, model, clip, vae) = g.CreateModelLoader(t2iModel, "Refiner", sectionId: parts[0].ContextID);
+                g.FinalLoadedModel = t2iModel;
+                g.CurrentModel = model;
+                g.NoVAEOverride = false;
+            }
+            PromptRegion negativeRegion = new(g.UserInput.Get(T2IParamTypes.NegativePrompt, ""));
+            PromptRegion.Part[] negativeParts = [.. negativeRegion.Parts.Where(p => p.Type == PromptRegion.PartType.CustomPart && p.Prefix == DIRECTIVE)];
+            int growAmt = g.UserInput.Get(DetailMaskGrow, 16);
+            for (int i = 0; i < parts.Length; i++)
+            {
+                PromptRegion.Part part = parts[i];
+                DetailerParams detailerParams;
+                MaskSpecifier maskSpec;
+                try
+                {
+                    (detailerParams, string maskSpecString) = ParseDetailerParams(g, part.DataText);
+                    maskSpec = ParseMaskSpecifier(maskSpecString);
+                }
+                catch (Exception ex)
+                {
+                    Logs.Error($"Error parsing {DIRECTIVE} '<{DIRECTIVE}:{part.DataText}>': " + ex.Message);
+                    continue;
+                }
+                string segmentNode = GenerateMaskNodes(g, maskSpec);
+                if (detailerParams.Blur > 0)
+                {
+                    segmentNode = g.CreateNode("SwarmMaskBlur", new JObject()
+                    {
+                        ["mask"] = new JArray() { segmentNode, 0 },
+                        ["blur_radius"] = detailerParams.Blur,
+                        ["sigma"] = 1
+                    });
+                }
+                // grow if top-level mask does not have a grow modifier
+                if (growAmt > 0 && !(maskSpec is GrowMask))
+                {
+                    segmentNode = g.CreateNode("GrowMask", new JObject()
+                    {
+                        ["mask"] = new JArray() { segmentNode, 0 },
+                        ["expand"] = growAmt,
+                        ["tapered_corners"] = true
+                    });
+                }
+                var saveDetailMask = g.UserInput.Get(SaveDetailMask, "Disabled");
+                if (saveDetailMask == "MaskOnly")
+                {
+                    string imageNode = g.CreateNode("MaskToImage", new JObject()
+                    {
+                        ["mask"] = new JArray() { segmentNode, 0 }
+                    });
+                    new WGNodeData([imageNode, 0], g, WGNodeData.DT_IMAGE, g.CurrentCompat()).SaveOutput(null, null, g.GetStableDynamicID(50000, 0));
+                }
+                else if (saveDetailMask == "MaskAndImage")
+                {
+                    string imageNode = g.CreateNode("WCMaskOverlay", new JObject()
+                    {
+                        ["image"] = g.CurrentMedia.Path,
+                        ["mask"] = new JArray() { segmentNode, 0 }
+                    });
+                    new WGNodeData([imageNode, 0], g, WGNodeData.DT_IMAGE, g.CurrentCompat()).SaveOutput(null, null, g.GetStableDynamicID(50000, 0));
+                }
+                int oversize = g.UserInput.Get(DetailMaskOversize, 16);
+                g.MaskShrunkInfo = CreateImageMaskCrop(g, [segmentNode, 0], g.CurrentMedia.Path, oversize, vae.Path, g.FinalLoadedModel, thresholdMax: g.UserInput.Get(DetailThresholdMax, 1));
+                g.EnableDifferential();
+                // EnableDifferential replaces CurrentModel rather than mutating it, so the local has to be
+                // re-read. Without this the DifferentialDiffusion node is emitted but never reaches the
+                // sampler, and the patch only took effect on the branch below that happened to re-read it.
+                model = g.CurrentModel;
+                if (part.ContextID > 0)
+                {
+                    (JArray loraModel, JArray loraClip) = g.LoadLorasForConfinement(part.ContextID, model.Path, clip.Path);
+                    model = model.WithPath(loraModel);
+                    clip = clip.WithPath(loraClip);
+                }
+                // PromptRegion substitutes the global prompt into a tag that carries no prompt of its own, but it
+                // does that only for PartType.Segment. A custom part is left empty, so an unadorned
+                // '<wcdetailer:mask>' would condition the detail pass on nothing at all.
+                string pos = string.IsNullOrWhiteSpace(part.Prompt) ? positiveRegion.GlobalPrompt : part.Prompt;
+                JArray prompt = g.CreateConditioning(pos, clip.Path, t2iModel, true);
+                string neg = negativeParts.FirstOrDefault(p => p.DataText == part.DataText)?.Prompt;
+                if (string.IsNullOrWhiteSpace(neg))
+                {
+                    neg = negativeRegion.GlobalPrompt;
+                }
+                JArray negPrompt = g.CreateConditioning(neg, clip.Path, t2iModel, false);
+
+                int steps = g.UserInput.GetNullable(T2IParamTypes.Steps, part.ContextID, false) ?? g.UserInput.GetNullable(DetailSteps, part.ContextID) ?? g.UserInput.GetNullable(T2IParamTypes.RefinerSteps, part.ContextID) ?? g.UserInput.Get(T2IParamTypes.Steps, 20, sectionId: part.ContextID);
+                int startStep = (int)Math.Round(steps * (1 - detailerParams.Creativity));
+                long seed = g.UserInput.Get(T2IParamTypes.Seed) + 2 + i;
+                double cfg = g.UserInput.GetNullable(T2IParamTypes.CFGScale, part.ContextID, false) ?? g.UserInput.GetNullable(DetailCFGScale, part.ContextID) ?? g.UserInput.GetNullable(T2IParamTypes.RefinerCFGScale, part.ContextID) ?? g.UserInput.Get(T2IParamTypes.CFGScale, 7, sectionId: part.ContextID);
+                WGNodeData beforeImage = g.CurrentMedia;
+                string sampler = g.CreateKSampler(model.Path, prompt, negPrompt, [g.MaskShrunkInfo.MaskedLatent, 0], cfg, steps, startStep, 10000, seed, false, true, sectionId: part.ContextID);
+                g.CurrentMedia = g.CurrentMedia.WithPath([sampler, 0], WGNodeData.DT_LATENT_IMAGE).AsRawImage(vae);
+                JArray recompositedImage = g.RecompositeCropped(g.MaskShrunkInfo.BoundsNode, [g.MaskShrunkInfo.CroppedMask, 0], beforeImage.Path, g.CurrentMedia.Path);
+                string conditionalImage = g.CreateNode("WCSkipIfMaskEmpty", new JObject()
+                {
+                    ["mask"] = new JArray() { segmentNode, 0 },
+                    ["image_if_empty"] = beforeImage.Path,
+                    ["image_if_not_empty"] = recompositedImage,
+                });
+                g.CurrentMedia = beforeImage.WithPath([conditionalImage, 0], WGNodeData.DT_IMAGE);
+                g.MaskShrunkInfo = priorMaskShrink;
+            }
+            g.FinalLoadedModel = priorLoadedModel;
+            g.CurrentModel = priorModel;
+            g.CurrentTextEnc = priorTextEnc;
+            g.CurrentVae = priorVae;
+        }
     }
     
     public static WorkflowGenerator.ImageMaskCropData CreateImageMaskCrop(WorkflowGenerator g, JArray mask, JArray image, int growBy, JArray vae, T2IModel model, double threshold = 0.01, double thresholdMax = 1)
