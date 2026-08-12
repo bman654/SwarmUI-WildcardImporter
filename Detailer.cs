@@ -510,13 +510,19 @@ public static class Detailer
         int targetX = int.Parse(targetWidth);
         int targetY = int.Parse(targetHeight);
         bool isCustomRes = targetX > 0 && targetY > 0;
+        int scaleWidth = isCustomRes ? targetX : model?.StandardWidth <= 0 ? g.UserInput.GetImageWidth() : model.StandardWidth;
+        int scaleHeight = isCustomRes ? targetY : model?.StandardHeight <= 0 ? g.UserInput.GetImageHeight() : model.StandardHeight;
         string boundsNode = g.CreateNode("WCMaskBounds", new JObject()
         {
             ["mask"] = mask,
             ["grow"] = growBy,
             ["aspect_x"] = isCustomRes ? targetX : 0,
             ["aspect_y"] = isCustomRes ? targetY : 0,
-            ["dynamic"] = dynamicRes
+            ["dynamic"] = dynamicRes,
+            // Align only the crops SwarmImageScaleForMP will hand straight through, which is exactly when it
+            // may not shrink and the crop already exceeds the target pixel count. Aligning the rest would
+            // distort the aspect ratio that node is about to scale toward. See the note in wcnodes.py.
+            ["align_above_pixels"] = dynamicRes ? scaleWidth * scaleHeight : 0
         });
         string croppedImage = g.CreateNode("SwarmImageCrop", new JObject()
         {
@@ -537,8 +543,8 @@ public static class Detailer
         string scaledImage = g.CreateNode("SwarmImageScaleForMP", new JObject()
         {
             ["image"] = new JArray() { croppedImage, 0 },
-            ["width"] = isCustomRes ? targetX : model?.StandardWidth <= 0 ? g.UserInput.GetImageWidth() : model.StandardWidth,
-            ["height"] = isCustomRes ? targetY : model?.StandardHeight <= 0 ? g.UserInput.GetImageHeight() : model.StandardHeight,
+            ["width"] = scaleWidth,
+            ["height"] = scaleHeight,
             ["can_shrink"] = !dynamicRes
         });
         JArray encoded = g.DoMaskedVAEEncode(vae, [scaledImage, 0], [croppedMask, 0], null);
