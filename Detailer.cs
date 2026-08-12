@@ -386,15 +386,16 @@ public static class Detailer
                 WGNodeData model = g.CurrentModel, clip = g.CurrentTextEnc, vae = g.CurrentVae;
                 if (g.UserInput.TryGet(DetailModel, out T2IModel segmentModel))
                 {
-                    if (segmentModel.ModelClass?.CompatClass != t2iModel.ModelClass?.CompatClass)
-                    {
-                        g.NoVAEOverride = true;
-                    }
+                    // NoVAEOverride tells the loader not to trust the user's VAE pick for a model of a different
+                    // compatibility class. It belongs to this one load: leaving it set applied it to every later
+                    // load in the workflow as well.
+                    g.NoVAEOverride = segmentModel.ModelClass?.CompatClass != t2iModel.ModelClass?.CompatClass;
                     t2iModel = segmentModel;
                     g.FinalLoadedModel = segmentModel;
-                    (t2iModel, model, clip, vae) = g.CreateModelLoader(t2iModel, "Refiner");
+                    (t2iModel, model, clip, vae) = g.CreateModelLoader(t2iModel, "Refiner", sectionId: parts[0].ContextID);
                     g.FinalLoadedModel = t2iModel;
                     g.CurrentModel = model;
+                    g.NoVAEOverride = false;
                 }
                 PromptRegion negativeRegion = new(g.UserInput.Get(T2IParamTypes.NegativePrompt, ""));
                 PromptRegion.Part[] negativeParts = [.. negativeRegion.Parts.Where(p => p.Type == PromptRegion.PartType.CustomPart && p.Prefix == DIRECTIVE)];
