@@ -49,10 +49,14 @@ Fifth, enter a wildcard prompt and click Generate!
 ## Prompt Utilities
 
 <img style="float: right; width: 45%; margin: 0 0 10px 10px;" src="./docs/prompt-utilities-1.png">
-The extension adds a new section to the generation parameters.  Currently there is only one new item in this section.
+The extension adds a new section to the generation parameters.
 
-* Cleanup Prompts - if enabled, then your prompts will be cleaned up.  Extraneous whitespace will be removed.  Newlines will be replaced with spaces.  Unnecessary commas will be removed.  This is really useful when working with wildcards which occasionally inject multiple commas.
-* AutoBreak - Automatically insert `<break>` tags in long prompts to keep each part <= 75 tokens.  Optimized for booru tag prompting style, this will intelligently look for safe places to break your prompt where it will not split a prompt mid-tag.
+* Prompt Cleanup - if `Enabled`, then your prompts will be cleaned up.  Extraneous whitespace will be removed.  Newlines will be replaced with spaces.  Unnecessary commas will be removed.  This is really useful when working with wildcards which occasionally inject multiple commas.
+* Prompt AutoBreak - if `Enabled`, automatically insert `<break>` tags in long prompts to keep each part <= 75 tokens.  Optimized for booru tag prompting style, this will intelligently look for safe places to break your prompt where it will not split a prompt mid-tag.
+
+Both are `Enabled`/`Disabled` dropdowns rather than checkboxes, so that a preset can record the "off" state as a value you can see.  In the preset editor a cleared checkbox looks exactly like a parameter you never touched, and it is seeded from whatever the main UI currently holds, so it is easy to save the opposite of what you meant; a dropdown reading `Disabled` is unambiguous.  Presets apply in the order you select them, so a preset holding `Prompt Cleanup: Disabled` overrides an earlier one holding `Prompt Cleanup: Enabled`.
+
+> **Upgrading:** these replace the old `Cleanup Prompts` and `AutoBreak` checkboxes.  The checkboxes still exist and are still honoured, they are just hidden from the UI, so presets and image metadata you saved before this change keep working.  When a prompt option is supplied in both forms, the new dropdown wins.  Re-save your presets against the new dropdowns to get the override behaviour.
 
 With both options enabled, turns a prompt like this:
 

@@ -13,8 +13,14 @@ namespace Spoomples.Extensions.WildcardImporter
     {
         private WildcardImporterAPI _api = null;
 
-        private T2IRegisteredParam<bool> PromptCleanup;
-        private T2IRegisteredParam<bool> PromptAutoBreak;
+        private const string ModeEnabled = "Enabled";
+        private const string ModeDisabled = "Disabled";
+
+        private T2IRegisteredParam<string> PromptCleanup;
+        private T2IRegisteredParam<string> PromptAutoBreak;
+
+        private T2IRegisteredParam<bool> LegacyPromptCleanup;
+        private T2IRegisteredParam<bool> LegacyPromptAutoBreak;
 
         public static PermInfoGroup WildcardImporterPermGroup = new("Wildcard Importer", "Permissions related to the Wildcard Importer Extension.");
 
@@ -66,25 +72,52 @@ namespace Spoomples.Extensions.WildcardImporter
         public void AddT2IParameters()
         {
             var paramGroup = new T2IParamGroup("Wildcard Importer Prompt Extensions", Toggles: true, Open: false, IsAdvanced: false, OrderPriority: 9);
-            PromptCleanup = T2IParamTypes.Register<bool>(new(
-                Name: "Cleanup Prompts",
-                Description: "Cleanup the prompt before submitting it to the model:\n\nConverts 'girl1, ,,, \nabsurdres,detailed,(perfect eyes),realistic  ' to 'girl1, absurdres, detailed, (perfect eyes), realistic'\n - Replace newlines with space\n - Replace multiple spaces with a single space\n - Replace multiple commas with a single comma\n - Ensure there is a single space after a comma or closing parenthesis\n - Remove trailing commas and whitespace",
-                Default: "false",
+            PromptCleanup = T2IParamTypes.Register<string>(new(
+                Name: "Prompt Cleanup",
+                Description: "Cleanup the prompt before submitting it to the model:\n\nConverts 'girl1, ,,, \nabsurdres,detailed,(perfect eyes),realistic  ' to 'girl1, absurdres, detailed, (perfect eyes), realistic'\n - Replace newlines with space\n - Replace multiple spaces with a single space\n - Replace multiple commas with a single comma\n - Ensure there is a single space after a comma or closing parenthesis\n - Remove trailing commas and whitespace\n\nPick 'Disabled' in a preset to switch this back off for a preset applied after one that enabled it.",
+                Default: ModeDisabled,
+                GetValues: _ => [ModeEnabled, ModeDisabled],
                 Group: paramGroup,
                 OrderPriority: 1
             ));
-            PromptAutoBreak = T2IParamTypes.Register<bool>(new(
-                Name: "AutoBreak",
-                Description: "Automatically insert <break> tags in long prompts to keep each part <= 75 tokens.\nOptimized for booru tag prompting style, this will intelligently look for safe places to break your prompt where it will not split a prompt mid-tag.\n\nFree yourself from token counting.  Disable if not using CLIP.",
-                Default: "false",
+            PromptAutoBreak = T2IParamTypes.Register<string>(new(
+                Name: "Prompt AutoBreak",
+                Description: "Automatically insert <break> tags in long prompts to keep each part <= 75 tokens.\nOptimized for booru tag prompting style, this will intelligently look for safe places to break your prompt where it will not split a prompt mid-tag.\n\nFree yourself from token counting.  Disable if not using CLIP.\n\nPick 'Disabled' in a preset to switch this back off for a preset applied after one that enabled it.",
+                Default: ModeDisabled,
+                GetValues: _ => [ModeEnabled, ModeDisabled],
                 Group: paramGroup,
-                OrderPriority: 1
+                OrderPriority: 2
+            ));
+            // Superseded by the two parameters above, and hidden from the UI so nobody picks them up as new.
+            // They stay registered so that presets, saved image metadata, and API calls written against the old
+            // names keep working -- unregistering them would turn every one of those into a hard "Unrecognized
+            // parameter type name" error. IgnoreIf keeps the hidden inputs the UI still submits from landing in
+            // the request and in image metadata, since only a `true` from an older preset carries any meaning.
+            LegacyPromptCleanup = T2IParamTypes.Register<bool>(new(
+                Name: "Cleanup Prompts",
+                Description: "Deprecated, use 'Prompt Cleanup' instead. Retained so existing presets and image metadata keep working; ignored when 'Prompt Cleanup' is supplied.",
+                Default: "false",
+                IgnoreIf: "false",
+                Group: paramGroup,
+                OrderPriority: 3,
+                VisibleNormally: false,
+                ExtraHidden: true
+            ));
+            LegacyPromptAutoBreak = T2IParamTypes.Register<bool>(new(
+                Name: "AutoBreak",
+                Description: "Deprecated, use 'Prompt AutoBreak' instead. Retained so existing presets and image metadata keep working; ignored when 'Prompt AutoBreak' is supplied.",
+                Default: "false",
+                IgnoreIf: "false",
+                Group: paramGroup,
+                OrderPriority: 4,
+                VisibleNormally: false,
+                ExtraHidden: true
             ));
 
             T2IParamInput.LateSpecialParameterHandlers.Add(userInput =>
                 {
-                    // if PromptCleanup is true, run the pos and neg prompts through Clean
-                    if (userInput.InternalSet.Get(PromptCleanup))
+                    // if prompt cleanup is enabled, run the pos and neg prompts through Clean
+                    if (IsEnabled(userInput, PromptCleanup, LegacyPromptCleanup))
                     {
                         var posPrompt = userInput.InternalSet.Get(T2IParamTypes.Prompt);
                         if (posPrompt != null)
@@ -98,8 +131,8 @@ namespace Spoomples.Extensions.WildcardImporter
                             userInput.InternalSet.Set(T2IParamTypes.NegativePrompt, Clean(negPrompt));
                         }
                     }
-                    // if PromptAutoBreak is true, run the pos and neg prompts through AutoBreak
-                    if (userInput.InternalSet.Get(PromptAutoBreak))
+                    // if auto break is enabled, run the pos and neg prompts through AutoBreak
+                    if (IsEnabled(userInput, PromptAutoBreak, LegacyPromptAutoBreak))
                     {
                         var posPrompt = userInput.InternalSet.Get(T2IParamTypes.Prompt);
                         if (posPrompt != null)
@@ -114,6 +147,19 @@ namespace Spoomples.Extensions.WildcardImporter
                         }
                     }
                 });
+        }
+
+        /// <summary>
+        /// Resolves one of the on/off prompt options, preferring the string-valued parameter and falling back to
+        /// its deprecated boolean predecessor when the string form was never supplied.
+        /// </summary>
+        private static bool IsEnabled(T2IParamInput userInput, T2IRegisteredParam<string> mode, T2IRegisteredParam<bool> legacy)
+        {
+            if (userInput.InternalSet.TryGet(mode, out string value) && !string.IsNullOrWhiteSpace(value))
+            {
+                return value.Equals(ModeEnabled, StringComparison.OrdinalIgnoreCase);
+            }
+            return userInput.InternalSet.Get(legacy);
         }
 
         /// <summary>
