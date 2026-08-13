@@ -37,6 +37,8 @@ feature that also gives some basic inpainting capabilities.
 5. Dynamic Resolution Mode
    - In this mode, when detailing based on a mask, the aspect ratio will be dynamically adjusted to maximize the pixel density of the area being detailed.  If the mask is already higher resolution than the Target Resolution, the mask resolution will be used during detailing.  This improves the quality of the results when the mask aspect ratio is significantly different from the target resolution aspect ratio, or when the mask is a significant portion of the image. 
 
+`<wcdetailer>` matches `<segment>` on `Apply After`: set **WC Detail Apply After** to `Base` to detail between the base sampler and the refiner, so the refiner blends the detailed areas afterwards, or leave it on `Refiner` (the default) to detail the finished image.
+
 The ability to define shapes and intersect/union/diff them against CLIPSEG features gives you some powerful automatic inpainting capabilities.
 You can, for example, find everything on the right side of the image that is NOT a person and supply a prompt with strong creativity to basically
 inpaint something new into the empty space on the right of the image.
@@ -59,6 +61,9 @@ The basic syntax is:
 `<wcdetailer:[param1:value1, ..., paramN:valueN] maskspecifier> prompt`
 
 The param:value pairs are optional if you want to override the global settings.
+
+The trailing prompt is optional too. As with `<segment>`, a tag with no prompt of its own details the region
+using your main prompt.
 
 Some examples:
 

@@ -2,6 +2,27 @@ import torch, comfy
 import numpy as np
 from scipy import ndimage
 
+# SwarmImageScaleForMP rounds its output up to a multiple of this, but it returns the crop completely
+# untouched when it is not allowed to shrink and the crop is already larger than the target. Only bounds
+# that take that route need aligning here. Aligning any other bounds would be worse than useless: that node
+# preserves the CROP's aspect ratio rather than the requested one, so rounding a 64x36 crop up to 64x64
+# turns a requested 16:9 detail pass into a 1:1 one.
+CROP_ALIGNMENT = 64
+
+def align_span(start, end, limit):
+    """Grows a [start, end) span so its length is a multiple of CROP_ALIGNMENT, centred on the original span
+    and clamped to [0, limit). If the image is too small to hold an aligned span that covers the original,
+    alignment wins and the span is trimmed -- an unaligned crop is the thing this exists to prevent, and the
+    lost strip is at the edge of a crop that is already larger than the sampler's target."""
+    start = int(start)
+    end = int(end)
+    size = end - start
+    aligned = -(-size // CROP_ALIGNMENT) * CROP_ALIGNMENT
+    if aligned > limit:
+        aligned = (limit // CROP_ALIGNMENT) * CROP_ALIGNMENT or limit
+    start = max(0, min(start - (aligned - size) // 2, limit - aligned))
+    return start, start + aligned
+
 class WCCompositeMask:
     @classmethod
     def INPUT_TYPES(s):
@@ -49,6 +70,7 @@ class WCMaskBounds:
                 "aspect_x": ("INT", {"default": 0, "min": 0, "max": 4096, "tooltip": "An X width value, used to indicate a target aspect ratio. 0 to allow any aspect."}),
                 "aspect_y": ("INT", {"default": 0, "min": 0, "max": 4096, "tooltip": "A Y height value, used to indicate a target aspect ratio. 0 to allow any aspect."}),
                 "dynamic": ("BOOLEAN", {"default": False, "tooltip": "If true, the aspect_x/y are only used to indicate overall minimum target pixel count the actual resolution will be chosen intelligently based upon mask size."}),
+                "align_above_pixels": ("INT", {"default": 0, "min": 0, "max": 0x40000000, "tooltip": "If the bounds enclose more pixels than this, grow them so both sides are a multiple of 64. Set this to the caller's target pixel count when the crop will bypass rescaling, so an unaligned image never reaches the VAE. 0 disables."}),
             }
         }
 
@@ -58,7 +80,7 @@ class WCMaskBounds:
     FUNCTION = "get_bounds"
     DESCRIPTION = "Returns the bounding box of the mask (as pixel coordinates x,y,width,height), optionally grown by the number of pixels specified in 'grow' and then optionally adjusted for aspect ratio."
 
-    def get_bounds(self, mask, grow, aspect_x=0, aspect_y=0, dynamic=False):
+    def get_bounds(self, mask, grow, aspect_x=0, aspect_y=0, dynamic=False, align_above_pixels=0):
         if len(mask.shape) == 3:
             mask = mask[0]
         sum_x = (torch.sum(mask, dim=0) != 0).to(dtype=torch.int)
@@ -88,6 +110,9 @@ class WCMaskBounds:
                 desired_width = height * input_aspect
                 x_start = max(0, x_start - (desired_width - width) / 2)
                 x_end = min(mask.shape[1], x_start + desired_width)
+        if align_above_pixels > 0 and (int(x_end) - int(x_start)) * (int(y_end) - int(y_start)) > align_above_pixels:
+            x_start, x_end = align_span(x_start, x_end, mask.shape[1])
+            y_start, y_end = align_span(y_start, y_end, mask.shape[0])
         return (int(x_start), int(y_start), int(x_end - x_start), int(y_end - y_start))
 
 
