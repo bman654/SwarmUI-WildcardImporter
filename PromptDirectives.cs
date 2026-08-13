@@ -436,8 +436,20 @@ namespace Spoomples.Extensions.WildcardImporter
              */
             T2IPromptHandling.PromptTagProcessors["wcnegative"] = (data, context) =>
             {
+                // Parse at the CALLSITE. The negative prompt is processed by a later pass
+                // (T2IParamInput.PreparsePromptLikes runs the positive first, then the negative
+                // over a context that shares the positive's Variables and Macros), so text left
+                // unparsed here is not resolved where it was written -- it is resolved against
+                // end-of-render state. Any value scoped with wcpushvar/wcpopvar has been popped by
+                // then and silently resolves to empty.
+                //
+                // This is what makes the directive usable rather than merely differently-timed:
+                // deferring the parse means a dynamic value can never be captured at all, because
+                // whatever it refers to is free to change between the write and the deferred read.
+                // Resolving now is the only point at which the intended value is known.
+                var parsed = context.Parse(data);
                 var current = context.Input.Get(T2IParamTypes.NegativePrompt) ?? "";
-                var updated = context.PreData?.ToLowerFast() == "prepend" ? $"{data}{current}" : $"{current}{data}";
+                var updated = context.PreData?.ToLowerFast() == "prepend" ? $"{parsed}{current}" : $"{current}{parsed}";
                 context.Input.Set(T2IParamTypes.NegativePrompt, updated);
                 return "";
             };
