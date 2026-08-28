@@ -315,6 +315,9 @@ public static class Detailer
     private static T2IRegisteredParam<double> DetailThresholdMax, DetailCFGScale;
     private static T2IRegisteredParam<T2IModel> DetailModel;
     private static T2IParamGroup GroupDetailRefining, GroupDetailOverrides;
+
+    /// <summary>Values of the 'WC Detail Apply After' parameter, one per stage the detail pass can run in.</summary>
+    private const string StageBase = "Base", StageUpscale = "Upscale", StageRefiner = "Refiner";
     public static void AddT2IParameters()
     {
         GroupDetailRefining = new("WC Detailer", Open: false, OrderPriority: 9.5, IsAdvanced: false);
@@ -339,8 +342,8 @@ public static class Detailer
         DetailThresholdMax = T2IParamTypes.Register<double>(new("WC Detail Threshold Max", "Maximum mask match value of a detail mask before clamping.\nLower values force more of the mask to be counted as maximum masking.\nToo-low values may include unwanted areas of the image.\nHigher values may soften the mask.",
             "1", Min: 0, Max: 1, Step: 0.05, Toggleable: true, ViewType: ParamViewType.SLIDER, Group: GroupDetailRefining, OrderPriority: 6
             ));
-        DetailApplyAfter = T2IParamTypes.Register<string>(new("WC Detail Apply After", $"When to apply '<{DIRECTIVE}:>' processing.\n'Refiner' (default) applies it after the refiner step.\n'Base' applies it after the base sampler but before the refiner, allowing the refiner to then blend and refine the detailed areas.",
-            "Refiner", IgnoreIf: "Refiner", GetValues: _ => ["Base", "Refiner"], Group: GroupDetailRefining, OrderPriority: 8
+        DetailApplyAfter = T2IParamTypes.Register<string>(new("WC Detail Apply After", $"When to apply '<{DIRECTIVE}:>' processing.\n'{StageRefiner}' (default) applies it after the refiner step.\n'{StageBase}' applies it after the base sampler but before the refiner, allowing the refiner to then blend and refine the detailed areas.\nNote that an upscaling refiner will stretch the detail added at this stage.\n'{StageUpscale}' applies it after the refiner's upscale but before the refiner samples, so the detailing is done at the upscaled resolution instead of being detailed small and then stretched.",
+            StageRefiner, IgnoreIf: StageRefiner, GetValues: _ => [StageBase, StageUpscale, StageRefiner], Group: GroupDetailRefining, OrderPriority: 8
             ));
         DetailSortOrder = T2IParamTypes.Register<string>(new("WC Detail Sort Order", $"How to sort detail mask features when using '<{DIRECTIVE}:somemask[1]' syntax with indices.\nFor example: <{DIRECTIVE}:yolo-face_yolov8m-seg_60.pt[2]> with largest-smallest, will select the second largest face feature.",
             "left-right", IgnoreIf: "left-right", GetValues: _ => ["left-right", "right-left", "top-bottom", "bottom-top", "largest-smallest", "smallest-largest"], Group: GroupDetailRefining, OrderPriority: 7
@@ -374,29 +377,99 @@ public static class Detailer
         Logs.Init($"Adding {NodeFolder} to CustomNodePaths");
         AddT2IParameters();
         
-        // Two registrations sharing one body, each declining unless it is the selected stage. This is the
-        // shape the built-in <segment> uses for its own apply-after option; the step priority is the only
-        // thing that differs between the two.
-        WorkflowGeneratorSteps.AddStep(g =>
+        // One registration per stage, each declining unless it is the selected one. This is the shape the
+        // built-in <segment> uses for its own apply-after option, extended with an "Upscale" stage that
+        // <segment> does not offer.
+        void addStageStep(string stage, double priority, Action<WorkflowGenerator> body)
         {
-            if (g.UserInput.Get(DetailApplyAfter, "Refiner") != "Base")
+            WorkflowGeneratorSteps.AddStep(g =>
             {
-                return;
-            }
-            RunDetailerProcessing(g);
-        },
-            // after the base sampler, before the refiner
-            -4.5);
-        WorkflowGeneratorSteps.AddStep(g =>
+                if (g.UserInput.Get(DetailApplyAfter, StageRefiner) == stage)
+                {
+                    body(g);
+                }
+            }, priority);
+        }
+        // after the base sampler, before the refiner
+        addStageStep(StageBase, -4.5, RunDetailerProcessing);
+        // any priority in (-4, 1) lands after the refiner step and before the mask shrink recomposite, and core
+        // registers nothing in that window
+        addStageStep(StageUpscale, -3.95, RunDetailerBeforeRefinerSampling);
+        // When there was no refiner sampling to get ahead of, the detail pass still has to happen. Doing it here
+        // rather than in the step above keeps it after the final decode and the standalone pixel decoder, which
+        // core skips (priority 1) once the media is no longer a latent.
+        addStageStep(StageUpscale, 5, g =>
         {
-            if (g.UserInput.Get(DetailApplyAfter, "Refiner") != "Refiner")
+            if (!g.NodeHelpers.ContainsKey(DetailedAheadOfRefinerKey))
             {
-                return;
+                RunDetailerProcessing(g);
             }
-            RunDetailerProcessing(g);
-        },
-            // same priority as <segment>
-            5);
+        });
+        // same priority as <segment>
+        addStageStep(StageRefiner, 5, RunDetailerProcessing);
+    }
+
+    /// <summary>ID the core workflow generator reserves for the refiner's sampler (WorkflowGeneratorSteps.cs, "id: 23").</summary>
+    private const string RefinerSamplerNodeId = "23";
+
+    /// <summary>Marks that the "Upscale" stage already detailed ahead of the refiner, so the late step stands down.</summary>
+    private const string DetailedAheadOfRefinerKey = "wcdetailer-detailed-ahead-of-refiner";
+
+    /// <summary>
+    /// Node classes core leaves feeding the refiner sampler's latent in an ordinary refine: the re-encode of an
+    /// upscaled image, a latent-side upscale, or the base sampler itself when no upscale is configured.
+    /// Anything else means CreateKSampler replaced that latent with one it built from conditioning, as the edit,
+    /// inpaint and super-resolution model classes do. Those carry preparation the sampler needs and are not the
+    /// upscaled image, so they must be left alone.
+    /// </summary>
+    private static readonly HashSet<string> PlainRefinerLatentSources =
+        ["VAEEncode", "VAEEncodeTiled", "LatentUpscaleBy", "SwarmKSampler", "KSamplerAdvanced", "SamplerCustomAdvanced"];
+
+    /// <summary>
+    /// The latent the refiner is about to sample, when that latent is the upscaled media and may therefore be
+    /// detailed and replaced. Null when there is no refiner sampler at all, or when its latent is model-prepared.
+    /// </summary>
+    private static JArray SpliceableRefinerInputLatent(WorkflowGenerator g)
+    {
+        JArray latentIn = (g.Workflow[RefinerSamplerNodeId] as JObject)?["inputs"]?["latent_image"] as JArray;
+        if (latentIn is null)
+        {
+            return null;
+        }
+        string sourceClass = $"{(g.Workflow[$"{latentIn[0]}"] as JObject)?["class_type"]}";
+        return PlainRefinerLatentSources.Contains(sourceClass) ? latentIn : null;
+    }
+
+    /// <summary>
+    /// Runs the detail pass for the "Upscale" stage: after the refiner's upscale but before the refiner samples,
+    /// so the detailing works at the upscaled resolution rather than being detailed small and then stretched up.
+    /// Core does the upscale and the sampling inside one step (priority -4) and offers no hook between them, so
+    /// this runs just after that step and reaches back into it instead: the refiner sampler's input latent is the
+    /// upscaled media, so detail that and re-point the sampler at the result.
+    /// </summary>
+    private static void RunDetailerBeforeRefinerSampling(WorkflowGenerator g)
+    {
+        JArray latentIn = SpliceableRefinerInputLatent(g);
+        if (latentIn is null)
+        {
+            // No refiner sampling happened, or its latent belongs to the model rather than to the upscale. Either
+            // way there is nothing to get ahead of, so the late step details the finished media instead.
+            Logs.Debug($"{DIRECTIVE}: no upscaled latent to detail ahead of node {RefinerSamplerNodeId}, deferring the detail pass to after the refiner.");
+            return;
+        }
+        WGNodeData afterRefine = g.CurrentMedia;
+        // Aiming the generator at the sampler's input latent rather than its output is what moves the detail pass
+        // ahead of the sampling. When that latent came straight from a VAE encode, decoding it resolves back to
+        // that encode's own pixels instead of adding a decode node, so the common upscale path costs nothing.
+        g.CurrentMedia = afterRefine.WithPath(latentIn);
+        RunDetailerProcessing(g);
+        // AsSamplingLatent is what core hands its own sampler: for media carrying audio it builds the joint latent
+        // the sampler expects, which a bare encode would drop. It lands on a new node rather than core's reserved
+        // encode because a latent-side upscale leaves that encode *upstream* of the latent being replaced, so
+        // reusing its ID would wire the graph into a cycle. Core's post-cleanup drops whatever this orphans.
+        g.Workflow[RefinerSamplerNodeId]["inputs"]["latent_image"] = g.CurrentMedia.AsSamplingLatent(g.CurrentVae, g.CurrentAudioVae).Path;
+        g.CurrentMedia = afterRefine;
+        g.NodeHelpers[DetailedAheadOfRefinerKey] = "true";
     }
 
     private static void RunDetailerProcessing(WorkflowGenerator g)

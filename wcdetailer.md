@@ -37,7 +37,13 @@ feature that also gives some basic inpainting capabilities.
 5. Dynamic Resolution Mode
    - In this mode, when detailing based on a mask, the aspect ratio will be dynamically adjusted to maximize the pixel density of the area being detailed.  If the mask is already higher resolution than the Target Resolution, the mask resolution will be used during detailing.  This improves the quality of the results when the mask aspect ratio is significantly different from the target resolution aspect ratio, or when the mask is a significant portion of the image. 
 
-`<wcdetailer>` matches `<segment>` on `Apply After`: set **WC Detail Apply After** to `Base` to detail between the base sampler and the refiner, so the refiner blends the detailed areas afterwards, or leave it on `Refiner` (the default) to detail the finished image.
+**WC Detail Apply After** chooses which stage the detailing runs in:
+
+- `Refiner` (the default) details the finished image, after the refiner has run.
+- `Base` details between the base sampler and the refiner, so the refiner blends and refines the detailed areas afterwards. Note that the detail pass works at the pre-upscale resolution, so an upscaling refiner will stretch the added detail rather than preserve it.
+- `Upscale` details after the refiner's upscale but before the refiner samples. The detail pass gets the full upscaled resolution to work at, and the refiner still blends the result. If the refiner never reaches its sampler, the detail pass simply runs on whatever the refiner produced.
+
+`Base` and `Refiner` match `<segment>`'s option of the same name; `Upscale` has no `<segment>` equivalent.
 
 The ability to define shapes and intersect/union/diff them against CLIPSEG features gives you some powerful automatic inpainting capabilities.
 You can, for example, find everything on the right side of the image that is NOT a person and supply a prompt with strong creativity to basically
