@@ -77,6 +77,13 @@ Some examples:
 * `<wcdetailer: yolo-face_yolov8m-seg_60.pt[1] & girl> close-up, 1girl, face, ...`
 * `<wcdetailer:[creativity:0.2] hull(face & !boy)>close-up, 1girl, face, ...`
 
+**A note on `(...)` and `[...]`:** SwarmUI rewrites A1111/Comfy prompt syntax, turning `(a)` into
+`<weight[1.1]:a>` and `[a:0.5]` into `<fromto[0.5]:,a>`, which collides with this directive's grouping,
+function-call and `[param:value]` syntax. The parentheses and brackets *inside* the `<wcdetailer:...>` tag
+are shielded from that rewrite, so write the mask expression exactly as documented here and nothing else is
+needed. The trailing prompt after the `>` is ordinary prompt text and is **not** shielded — `(detailed:1.4)`
+there means weighting, as it does anywhere else in your prompt.
+
 
 ### Mask Specifiers
 
