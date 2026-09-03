@@ -372,6 +372,7 @@ public static class Detailer
     {
         PromptRegion.RegisterCustomPrefix(DIRECTIVE);
         T2IPromptHandling.PromptTagBasicProcessors[DIRECTIVE] = T2IPromptHandling.PromptTagBasicProcessors["segment"];
+        T2IPromptHandling.PromptTagPostProcessors[DIRECTIVE] = DetailerLegacyPromptShield.ShieldFromLegacyParser;
         var NodeFolder = Path.Join(FilePath, "WCNodes");
         ComfyUISelfStartBackend.CustomNodePaths.Add(NodeFolder);
         Logs.Init($"Adding {NodeFolder} to CustomNodePaths");
@@ -512,16 +513,19 @@ public static class Detailer
             for (int i = 0; i < parts.Length; i++)
             {
                 PromptRegion.Part part = parts[i];
+                // Undoes DetailerLegacyPromptShield.Escape for the case where the legacy prompt parser was
+                // switched off and so never consumed the backslashes itself. A no-op otherwise.
+                string dataText = DetailerLegacyPromptShield.Unescape(part.DataText);
                 DetailerParams detailerParams;
                 MaskSpecifier maskSpec;
                 try
                 {
-                    (detailerParams, string maskSpecString) = ParseDetailerParams(g, part.DataText);
+                    (detailerParams, string maskSpecString) = ParseDetailerParams(g, dataText);
                     maskSpec = ParseMaskSpecifier(maskSpecString);
                 }
                 catch (Exception ex)
                 {
-                    Logs.Error($"Error parsing {DIRECTIVE} '<{DIRECTIVE}:{part.DataText}>': " + ex.Message);
+                    Logs.Error($"Error parsing {DIRECTIVE} '<{DIRECTIVE}:{dataText}>': " + ex.Message);
                     continue;
                 }
                 string segmentNode = GenerateMaskNodes(g, maskSpec);
